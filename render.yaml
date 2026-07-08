@@ -1,0 +1,33 @@
+# Render Blueprint — Aldi Bot Backend (+ frontend UI bundle)
+# Deploy: Render Dashboard → New → Blueprint → connect this repo
+
+services:
+  - type: web
+    name: aldi-bot-backend
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm run build:render
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_DB_NAME
+        value: aldi_bot
+      - key: OPENROUTER_MODEL
+        value: google/gemini-2.5-flash
+      - key: QUOTEX_MARKET_API_URL
+        value: https://quotex-data-1n2b.onrender.com
+      # Set these manually in Render Dashboard (Environment):
+      - key: MONGODB_URI
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # After first deploy, set to your Render URL, e.g. https://aldi-bot-backend.onrender.com
+      - key: FRONTEND_URL
+        sync: false
+      - key: ADMIN_URL
+        sync: false
