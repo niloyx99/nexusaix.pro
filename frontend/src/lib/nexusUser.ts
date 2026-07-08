@@ -1,5 +1,6 @@
 import type { NexusUser } from '../types';
 import { getCachedDeviceFingerprint, getDeviceFingerprint } from './deviceFingerprint';
+import { apiUrl } from './api';
 
 const STORAGE_KEY = 'nexus_user';
 
@@ -41,7 +42,7 @@ export interface ValidatePayload {
 }
 
 export async function validateLicenseApi(payload: ValidatePayload) {
-  const res = await fetch('/api/licenses/validate', {
+  const res = await fetch(apiUrl('/api/licenses/validate'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -72,7 +73,7 @@ export async function validateLicenseApi(payload: ValidatePayload) {
 
 export async function refreshLicenseStatus(licenseKey: string, deviceFingerprint?: string) {
   const fp = deviceFingerprint || (await getDeviceFingerprint());
-  const res = await fetch(`/api/licenses/status?key=${encodeURIComponent(licenseKey)}`, {
+  const res = await fetch(apiUrl(`/api/licenses/status?key=${encodeURIComponent(licenseKey)}`), {
     headers: {
       'X-License-Key': licenseKey,
       'X-Device-Fingerprint': fp,

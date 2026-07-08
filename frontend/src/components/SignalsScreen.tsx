@@ -21,6 +21,7 @@ import {
 import NexusLogoAvatar from './NexusLogoAvatar';
 import AnalysisLoader from './AnalysisLoader';
 import { getLicenseHeaders } from '../lib/nexusUser';
+import { apiUrl } from '../lib/api';
 
 interface Signal {
   id: string;
@@ -173,7 +174,7 @@ export default function SignalsScreen() {
     setCheckProgress(12);
 
     try {
-      const response = await fetch('/api/signals/check', {
+      const response = await fetch(apiUrl('/api/signals/check'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -252,7 +253,7 @@ export default function SignalsScreen() {
     setGenerateError(null);
 
     try {
-      const response = await fetch('/api/signals/generate', {
+      const response = await fetch(apiUrl('/api/signals/generate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

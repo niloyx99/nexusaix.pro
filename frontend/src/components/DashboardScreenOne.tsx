@@ -5,6 +5,7 @@ import ProgressArc from './ProgressArc';
 import AnalysisLoader from './AnalysisLoader';
 import NexusLogoAvatar from './NexusLogoAvatar';
 import { getLicenseHeaders } from '../lib/nexusUser';
+import { apiUrl } from '../lib/api';
 import { CHART_PASTE_EVENT } from '../utils/clipboardImage';
 
 interface AnalysisResult {
@@ -106,7 +107,7 @@ export default function DashboardScreenOne() {
     setError(null);
 
     try {
-      const response = await fetch('/api/analyze', {
+      const response = await fetch(apiUrl('/api/analyze'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

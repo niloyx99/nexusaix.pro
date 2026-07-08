@@ -16,6 +16,7 @@ import { startChartAnalyticsResolver } from "./services/chartAnalytics.js";
 import { connectMongo, disconnectMongo } from "./db/mongo.js";
 import { migrateJsonToMongoIfNeeded } from "./db/migrateFromJson.js";
 import { loadMarketSnapshotCache } from "./services/marketSnapshotCache.js";
+import { getAllowedOrigins, isAllowedOrigin } from "./config/cors.js";
 
 dotenv.config();
 
@@ -25,34 +26,6 @@ const PORT = Number(process.env.PORT) || 7777;
 const frontendDist = path.join(__dirname, "../../frontend/dist");
 const frontendIndex = path.join(frontendDist, "index.html");
 const hasFrontendBuild = fs.existsSync(frontendIndex);
-
-function getAllowedOrigins(): string[] {
-  return [
-    process.env.FRONTEND_URL,
-    process.env.ADMIN_URL,
-    process.env.RENDER_EXTERNAL_URL,
-    process.env.BACKEND_URL,
-    "http://localhost:7777",
-    "http://127.0.0.1:7777",
-    "http://localhost:8889",
-    "http://127.0.0.1:8889",
-    "http://localhost:8890",
-    "http://127.0.0.1:8890",
-  ].filter(Boolean) as string[];
-}
-
-function isAllowedOrigin(origin: string): boolean {
-  const allowed = getAllowedOrigins();
-  if (allowed.includes(origin)) return true;
-  if (/^http:\/\/192\.168\.\d+\.\d+:(7777|8889|8890)$/.test(origin)) return true;
-  try {
-    const { hostname } = new URL(origin);
-    if (hostname.endsWith(".onrender.com")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function startServer() {
   console.log(`Starting Aldi Bot backend (${isProduction ? "production" : "development"})...`);
@@ -64,6 +37,9 @@ async function startServer() {
 
   const app = express();
   app.set("trust proxy", 1);
+
+  const allowedOrigins = getAllowedOrigins();
+  console.log(`CORS allowed origins: ${allowedOrigins.join(", ")}`);
 
   app.use(
     cors({

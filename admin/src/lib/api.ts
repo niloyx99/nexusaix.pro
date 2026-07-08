@@ -1,5 +1,6 @@
 import type { License } from "../types";
 import { clearLegacyLicenses, getAdminPassword, loadLegacyLicenses } from "./storage";
+import { apiUrl } from "./backend";
 
 async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const password = getAdminPassword();
@@ -7,7 +8,7 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   headers.set("Content-Type", "application/json");
   if (password) headers.set("X-Admin-Password", password);
 
-  const res = await fetch(`/api/admin/licenses${path}`, {
+  const res = await fetch(apiUrl(`/api/admin/licenses${path}`), {
     ...init,
     headers,
   });
@@ -110,7 +111,7 @@ export async function resetLicenseDeviceApi(id: string): Promise<License> {
 }
 
 export async function verifyAdminPassword(password: string): Promise<boolean> {
-  const res = await fetch("/api/admin/licenses/", {
+  const res = await fetch(apiUrl("/api/admin/licenses/"), {
     headers: {
       "X-Admin-Password": password,
     },
