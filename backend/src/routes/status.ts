@@ -37,6 +37,14 @@ function apiPayload() {
 
 const router = Router();
 
+router.get("/", (_req, res) => {
+  res.status(200).json({
+    ...apiPayload(),
+    mode: "api-only",
+    note: "Frontend and admin are hosted separately. Point VITE_BACKEND_URL to this server.",
+  });
+});
+
 router.get("/api", (_req, res) => {
   res.status(200).json({
     ...apiPayload(),

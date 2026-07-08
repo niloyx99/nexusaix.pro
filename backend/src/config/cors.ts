@@ -39,15 +39,29 @@ export function isAllowedOrigin(origin: string): boolean {
   const normalized = normalizeOrigin(origin);
   const allowed = getAllowedOrigins();
   if (allowed.includes(normalized)) return true;
-  if (/^http:\/\/192\.168\.\d+\.\d+:(7777|8889|8890)$/.test(normalized)) return true;
+  if (/^https?:\/\/192\.168\.\d+\.\d+:(7777|8889|8890)$/.test(normalized)) return true;
 
-  if (process.env.NODE_ENV !== "production") {
+  // Production: also allow hosted frontend/admin on Render, Vercel, Netlify
+  if (process.env.NODE_ENV === "production") {
     try {
-      const { hostname } = new URL(normalized);
-      if (hostname.endsWith(".onrender.com")) return true;
+      const { hostname, protocol } = new URL(normalized);
+      if (protocol !== "https:" && protocol !== "http:") return false;
+      const hosted =
+        hostname.endsWith(".onrender.com") ||
+        hostname.endsWith(".vercel.app") ||
+        hostname.endsWith(".netlify.app");
+      if (hosted && allowed.some((o) => o.includes(hostname))) return true;
     } catch {
       return false;
     }
+    return false;
+  }
+
+  try {
+    const { hostname } = new URL(normalized);
+    if (hostname.endsWith(".onrender.com")) return true;
+  } catch {
+    return false;
   }
 
   return false;

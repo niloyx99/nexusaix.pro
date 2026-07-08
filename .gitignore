@@ -1,11 +1,17 @@
-node_modules/
-dist/
-build/
-.env
-.env.local
-.env.*.local
-*.log
-.DS_Store
+# Local-only apps (not in GitHub — keep on your machine)
+/frontend/
+/admin/
+/package.json
+/package-lock.json
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/.env.local
 backend/data/quotex-session.json
 backend/data/*.json
 !backend/data/.gitkeep
+
+*.log
+.DS_Store

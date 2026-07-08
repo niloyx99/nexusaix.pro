@@ -1,8 +1,0 @@
-{
-  "name": "Remix: Glassmorphism Dashboard",
-  "description": "A gorgeous, fully responsive glassmorphism mobile dashboard app featuring animated KPI progress arcs, interactive bar charts, stats widgets, and smooth navigation toggles.",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}

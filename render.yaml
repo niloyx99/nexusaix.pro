@@ -1,13 +1,14 @@
-# Render Blueprint — Aldi Bot Backend (+ frontend UI bundle)
-# Deploy: Render Dashboard → New → Blueprint → connect this repo
+# Render Blueprint — API only (frontend & admin hosted separately)
+# Repo: https://github.com/niloyx99/nexus-ai-
 
 services:
   - type: web
-    name: aldi-bot-backend
+    name: nexus-ai-backend
     runtime: node
     region: singapore
     plan: free
-    buildCommand: npm run build:render
+    rootDir: backend
+    buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -19,7 +20,6 @@ services:
         value: google/gemini-2.5-flash
       - key: QUOTEX_MARKET_API_URL
         value: https://quotex-data-1n2b.onrender.com
-      # Set these manually in Render Dashboard (Environment):
       - key: MONGODB_URI
         sync: false
       - key: OPENROUTER_API_KEY

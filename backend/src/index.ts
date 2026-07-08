@@ -1,8 +1,5 @@
 import express from "express";
 import cors from "cors";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import analyzeRouter from "./routes/analyze.js";
 import statusRouter from "./routes/status.js";
@@ -20,15 +17,11 @@ import { getAllowedOrigins, isAllowedOrigin } from "./config/cors.js";
 
 dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = Number(process.env.PORT) || 7777;
-const frontendDist = path.join(__dirname, "../../frontend/dist");
-const frontendIndex = path.join(frontendDist, "index.html");
-const hasFrontendBuild = fs.existsSync(frontendIndex);
 
 async function startServer() {
-  console.log(`Starting Aldi Bot backend (${isProduction ? "production" : "development"})...`);
+  console.log(`Starting Nexus AI API (${isProduction ? "production" : "development"})...`);
 
   await connectMongo();
   console.log("MongoDB connected.");
@@ -65,37 +58,20 @@ async function startServer() {
   app.use("/api/signals", signalsRouter);
   app.use("/api/analytics", analyticsRouter);
 
-  if (hasFrontendBuild) {
-    app.use(
-      express.static(frontendDist, {
-        maxAge: isProduction ? "1h" : 0,
-        index: false,
-      })
-    );
-    app.get("*", (req, res, next) => {
-      if (req.path.startsWith("/api")) return next();
-      res.sendFile(frontendIndex);
-    });
-  }
-
   app.use((req, res) => {
     res.status(404).json({
       success: false,
       status: "not_found",
       message: `Route ${req.method} ${req.originalUrl} does not exist.`,
-      hint: "Try GET / or GET /api/health",
+      hint: "API only — try GET /api/health",
       timestamp: new Date().toISOString(),
     });
   });
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    const publicUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-    console.log(`Backend running on ${publicUrl}`);
-    if (hasFrontendBuild) {
-      console.log(`Frontend UI served from ${publicUrl}`);
-    } else {
-      console.warn("Frontend build missing — run: npm run build --prefix frontend");
-    }
+    const publicUrl = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    console.log(`API server: ${publicUrl}`);
+    console.log("Mode: API-only (frontend & admin hosted separately)");
 
     checkMarketDataHealth().then((health) => {
       if (health.status === "ok") {
