@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom background glow animations and glassmorphism helpers */
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(1) translate(0px, 0px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.15) translate(15px, -15px);
+    opacity: 0.85;
+  }
+}
+
+.animate-glow-1 {
+  animation: pulseGlow 12s infinite alternate ease-in-out;
+}
+
+.animate-glow-2 {
+  animation: pulseGlow 18s infinite alternate-reverse ease-in-out;
+}
+
+/* Mobile viewport + safe areas — prevent header/nav sliding into content */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#dashboard-container {
+  height: 100dvh;
+  max-height: 100dvh;
+}
+
+@supports not (height: 100dvh) {
+  #dashboard-container {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}
+
+@media (min-width: 1024px) {
+  #dashboard-container {
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100%;
+  }
+}
+
+:root {
+  --app-safe-top: max(1.75rem, env(safe-area-inset-top, 0px));
+  --app-safe-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+  --app-nav-height: 4rem;
+  --app-nav-gap: 1.25rem;
+}
+
+/* Hide scrollbars completely while maintaining full touch/scroll behavior */
+::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+  background: transparent; /* make scrollbar invisible */
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
