@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { Lock, Loader2, Shield, AlertCircle } from "lucide-react";
 import { adminLogin } from "../lib/storage";
 import { verifyAdminPassword } from "../lib/api";
+import { getBackendUrl } from "../lib/backend";
 
 interface AdminLoginProps {
   onSuccess: () => void;
@@ -22,14 +23,19 @@ export default function AdminLogin({ onSuccess }: AdminLoginProps) {
     try {
       const ok = await verifyAdminPassword(trimmed);
       if (!ok) {
-        setError("Invalid admin password or backend offline.");
+        setError("Invalid admin password or backend rejected login.");
         setPassword("");
         return;
       }
       adminLogin(trimmed);
       onSuccess();
     } catch {
-      setError("Cannot reach backend API. Start backend on port 7777.");
+      const backend = getBackendUrl();
+      setError(
+        backend
+          ? `Cannot reach backend at ${backend}. Check Render is live and CORS allows this admin URL.`
+          : "VITE_BACKEND_URL is missing — set it in Vercel env and redeploy."
+      );
     } finally {
       setLoading(false);
     }

@@ -25,8 +25,12 @@ services:
         value: https://quotex-data-1n2b.onrender.com
       - key: FRONTEND_URL
         value: https://nexusaix.pro,https://www.nexusaix.pro
+      - key: ADMIN_URL
+        value: https://nexusaix-pro.vercel.app
+      - key: BACKEND_URL
+        value: https://nexusaix-pro-backend.onrender.com
       - key: CORS_ORIGINS
-        value: https://nexusaix.pro,https://www.nexusaix.pro
+        value: https://nexusaix.pro,https://www.nexusaix.pro,https://nexusaix-pro.vercel.app
       - key: API_PREFIX
         value: /nx-svc-k8m4t7q2w9p3
       - key: ADMIN_PATH
@@ -36,8 +40,4 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: ADMIN_PASSWORD
-        sync: false
-      - key: BACKEND_URL
-        sync: false
-      - key: ADMIN_URL
         sync: false
