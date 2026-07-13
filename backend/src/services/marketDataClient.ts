@@ -334,9 +334,14 @@ export async function getRecentCandles(
     candles = getCachedCandles(pair, limit);
   }
 
-  // Only fetch remote history when we still lack enough candles (biggest latency source).
-  if (candles.length < 12) {
-    const historical = await fetchQuotexHistoricalCandles(pair, Math.min(limit, 40));
+  // Fetch deeper history when caller asks for EMA-length windows (REAL setup).
+  if (candles.length < Math.min(limit, 50)) {
+    const historical = await fetchQuotexHistoricalCandles(pair, Math.min(limit, 240));
+    if (historical.length) {
+      candles = mergeCandlesByTimestamp(historical, candles);
+    }
+  } else if (candles.length < limit && limit >= 100) {
+    const historical = await fetchQuotexHistoricalCandles(pair, Math.min(limit, 240));
     if (historical.length) {
       candles = mergeCandlesByTimestamp(historical, candles);
     }

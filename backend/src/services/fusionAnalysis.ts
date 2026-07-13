@@ -30,6 +30,11 @@ import {
   type MarketIntelligence,
 
 } from "./marketIntelligence.js";
+import {
+  applyTradeSetupRules,
+  type SetupGateResult,
+} from "./tradeSetupRules.js";
+import type { MarketCandle } from "./marketDataClient.js";
 
 
 
@@ -78,6 +83,12 @@ export interface FusedAnalysisResult extends AnalysisResult {
   marketMomentum: "BULLISH" | "BEARISH" | "NEUTRAL";
 
   marketDataSummary: string;
+
+  /** Light UI: REAL vs OTC rule engine */
+  setupMode?: "REAL" | "OTC";
+  setupNote?: string;
+  setupFilters?: string[];
+  martingaleHint?: "1-step" | "none";
 
 }
 
@@ -472,7 +483,9 @@ function mergeAnalysisText(
 
   payout: number | null,
 
-  directionsConflict = false
+  directionsConflict = false,
+
+  setup?: SetupGateResult | null
 
 ): string {
 
@@ -486,11 +499,17 @@ function mergeAnalysisText(
     return `### Simple Signal\n* **${quotexPair}** → **${fusedDirection}** (${fusionConfidence}%)\n* ${shortGemini || "Chart-only read."}`;
   }
 
+  const setupLine = setup?.note
+    ? `* **Setup**: ${setup.note}${setup.filters[0] ? ` · ${setup.filters[0]}` : ""}`
+    : null;
+
   return [
     "### Simple Signal",
     `* **Pair**: ${quotexPair}${payout ? ` · Payout ${payout}%` : ""}`,
     `* **Next candle**: **${fusedDirection}** · **${fusionConfidence}%**${directionsConflict ? " (conflict → careful)" : ""}`,
     `* **Live**: ${intel.momentum} · ${intel.nextCandleDirection}`,
+    setupLine,
+    setup?.martingaleHint === "1-step" ? `* **MTG**: 1-step recovery if first candle fails` : null,
     shortGemini ? `* **Chart**: ${shortGemini}` : null,
     fusionConfidence < 66 ? `* **Tip**: Confidence low — prefer HOLD / skip MTG.` : null,
   ]
@@ -665,6 +684,8 @@ export async function analyzeWithFusion(
 
   let pairInfo: Awaited<ReturnType<typeof getPairInfo>> = null;
 
+  let liveCandles: MarketCandle[] = [];
+
 
 
   if (health.status === "ok" && quotexPair && !isAllowedMarketPair(quotexPair)) {
@@ -674,7 +695,10 @@ export async function analyzeWithFusion(
 
     pairInfo = await getPairInfo(quotexPair);
 
-    const candleData = await getRecentCandles(quotexPair, 30);
+    const isOtcPreview =
+      gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
+    // REAL needs deeper history for EMA200; OTC can work with shorter window.
+    const candleData = await getRecentCandles(quotexPair, isOtcPreview ? 80 : 220);
 
 
 
@@ -697,6 +721,7 @@ export async function analyzeWithFusion(
       marketStatus = "ok";
 
       candlesUsed = candleData.candles.length;
+      liveCandles = candleData.candles;
 
       payoutPercent = pairInfo?.payout ?? candleData.payout ?? null;
 
@@ -786,10 +811,19 @@ export async function analyzeWithFusion(
   );
 
   const otcGate = applyOtcSafetyGate(isOtcMarket, intel, fusedDirection, fusionConfidencePct);
-  const safeDirection = otcGate.direction;
+  let safeDirection = otcGate.direction;
   fusionConfidencePct = clampWinRate(otcGate.confidence);
 
-
+  const setup = await applyTradeSetupRules({
+    isOtc: isOtcMarket,
+    direction: safeDirection,
+    confidence: fusionConfidencePct,
+    candles: liveCandles,
+    pair: quotexPair,
+    intel,
+  });
+  safeDirection = setup.direction;
+  fusionConfidencePct = clampWinRate(setup.confidence);
 
   const recommendation = fuseRecommendation(
 
@@ -835,7 +869,9 @@ export async function analyzeWithFusion(
 
     payoutPercent,
 
-    directionsConflict
+    directionsConflict,
+
+    setup
 
   );
 
@@ -866,6 +902,11 @@ export async function analyzeWithFusion(
     marketMomentum: momentum,
 
     marketDataSummary,
+
+    setupMode: isOtcMarket ? "OTC" : "REAL",
+    setupNote: setup.note,
+    setupFilters: setup.filters,
+    martingaleHint: setup.martingaleHint,
 
     analysisSources: {
 

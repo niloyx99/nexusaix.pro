@@ -38,6 +38,10 @@ interface AnalysisResult {
       payoutPercent: number | null;
     };
   };
+  setupMode?: 'REAL' | 'OTC';
+  setupNote?: string;
+  setupFilters?: string[];
+  martingaleHint?: '1-step' | 'none';
 }
 
 
@@ -636,6 +640,33 @@ export default function DashboardScreenOne() {
                         {analysisResult.recommendation}
                       </div>
                     </div>
+                    {(analysisResult.setupNote || analysisResult.setupFilters?.length) && (
+                      <div className="mt-3 relative z-10 flex flex-wrap items-center gap-2 lg:justify-center">
+                        {analysisResult.setupMode && (
+                          <span className="text-[9px] uppercase tracking-[0.18em] text-white/35 font-bold">
+                            {analysisResult.setupMode} setup
+                          </span>
+                        )}
+                        {analysisResult.setupNote && (
+                          <span className="text-[10px] text-white/45 font-medium">
+                            {analysisResult.setupNote}
+                          </span>
+                        )}
+                        {analysisResult.martingaleHint === '1-step' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber-500/25 text-amber-300/70 font-semibold">
+                            MTG×1
+                          </span>
+                        )}
+                        {analysisResult.setupFilters?.slice(0, 2).map((f) => (
+                          <span
+                            key={f}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-white/35"
+                          >
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* ==================== SCREENSHOT HIGHLIGHTED CONVENTIONAL METRICS ==================== */}

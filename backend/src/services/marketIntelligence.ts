@@ -542,6 +542,21 @@ function scoreDirection(signals: {
       if (signals.liquiditySweep.type === "SSL_SWEEP" && signals.opposite.nextBias === "UP") up += 4;
       if (signals.liquiditySweep.type === "BSL_SWEEP" && signals.opposite.nextBias === "DOWN") down += 4;
     }
+    // Prefer MSNR rejection paths (BUY support / SELL resistance)
+    if (signals.priceAction.rejection) {
+      if (signals.priceAction.pattern === "HAMMER") up += 3;
+      if (signals.priceAction.pattern === "SHOOTING_STAR") down += 3;
+    }
+  } else {
+    // REAL: respect momentum; avoid fighting clear trend structure early
+    if (signals.momentum === "BULLISH") {
+      up += 3;
+      down = Math.max(0, down - 2);
+    }
+    if (signals.momentum === "BEARISH") {
+      down += 3;
+      up = Math.max(0, up - 2);
+    }
   }
 
   const total = up + down || 1;
