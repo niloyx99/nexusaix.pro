@@ -287,10 +287,11 @@ export default function SignalsScreen() {
   };
 
   const getFormattedSignalsText = () => {
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
+    const UTC_OFFSET_HOURS = 6;
+    const today = new Date(Date.now() + UTC_OFFSET_HOURS * 3600 * 1000);
+    const day = String(today.getUTCDate()).padStart(2, '0');
+    const month = String(today.getUTCMonth() + 1).padStart(2, '0');
+    const year = today.getUTCFullYear();
     const dateStr = `${day}/${month}/${year}`;
 
     let text = `🗓𝗗𝗔𝗧𝗘 -${dateStr}\n`;
@@ -325,10 +326,10 @@ export default function SignalsScreen() {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Scrollable Container */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 lg:space-y-6 pb-4 overscroll-contain scrollbar-none lg:max-w-6xl">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 lg:space-y-6 pb-4 overscroll-contain scrollbar-none w-full lg:max-w-5xl lg:mx-auto">
         {/* Header Bar — mobile/tablet only */}
-        <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-[24px] bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
-          <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
+        <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
+          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
             <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
               <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
               <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
@@ -343,7 +344,7 @@ export default function SignalsScreen() {
             </span>
           </div>
 
-          <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
+          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
             <NexusLogoAvatar size="xs" />
           </div>
         </div>
@@ -355,7 +356,7 @@ export default function SignalsScreen() {
               initial={{ opacity: 0, y: -10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-extrabold tracking-wide flex items-center space-x-2.5 shadow-[0_0_20px_rgba(16,185,129,0.25)] animate-bounce"
+              className="p-3 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-extrabold tracking-wide flex items-center space-x-2.5 shadow-[0_0_20px_rgba(16,185,129,0.25)] animate-bounce"
             >
               <BellRing className="w-4 h-4 text-emerald-400 animate-pulse flex-shrink-0" />
               <div className="flex-1 leading-tight">{activeAlarmMessage}</div>
@@ -372,7 +373,7 @@ export default function SignalsScreen() {
         {/* Generator + Output — 2 columns on desktop */}
         <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start space-y-4 lg:space-y-0">
         {/* Generator Controls Card */}
-        <div className="p-4 lg:p-6 rounded-[28px] bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] space-y-3.5">
+        <div className="p-4 lg:p-6 rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] space-y-3.5">
           {/* Market Selection */}
           <div className="space-y-1.5">
             <label className="text-[9px] font-extrabold text-white/40 uppercase tracking-widest pl-1">
@@ -461,7 +462,7 @@ export default function SignalsScreen() {
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
             {generatedSignals.length === 0 && !isGenerating ? (
-              <div className="rounded-[28px] border border-dashed border-white/[0.06] p-10 flex flex-col items-center justify-center text-center bg-white/[0.01] min-h-[180px]">
+              <div className="rounded-xl border border-dashed border-white/[0.06] p-10 flex flex-col items-center justify-center text-center bg-white/[0.01] min-h-[180px]">
                 <Compass className="w-12 h-12 text-white/20 mb-3.5 stroke-[1.1] animate-spin-slow" />
                 <p className="text-[12px] font-bold text-white/60">No Live Signals Yet</p>
                 <p className="text-[10px] text-white/35 max-w-[220px] mt-1.5 leading-normal">
@@ -472,7 +473,7 @@ export default function SignalsScreen() {
               <motion.div
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="relative rounded-[28px] bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] p-5 pt-14 font-mono text-[10px] lg:text-[11px] text-white/90 leading-relaxed overflow-x-auto whitespace-pre-wrap break-words selection:bg-emerald-500/30 select-text max-h-[350px] lg:max-h-[calc(100vh-220px)] lg:min-h-[400px] scrollbar-thin [-webkit-user-select:text] [user-select:text]"
+                className="relative rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] p-5 pt-14 font-mono text-[10px] lg:text-[11px] text-white/90 leading-relaxed overflow-x-auto whitespace-pre-wrap break-words selection:bg-emerald-500/30 select-text max-h-[350px] lg:max-h-[calc(100vh-220px)] lg:min-h-[400px] scrollbar-thin [-webkit-user-select:text] [user-select:text]"
               >
                 {/* Copy Button — works on mobile HTTP via fallback */}
                 <button
@@ -507,7 +508,7 @@ export default function SignalsScreen() {
         </div>
 
         {/* Future Signal Checker */}
-        <div className="p-4 lg:p-6 rounded-[28px] bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] space-y-3.5">
+        <div className="p-4 lg:p-6 rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-[13px] font-black text-white uppercase tracking-wider">
@@ -566,7 +567,7 @@ export default function SignalsScreen() {
                 <MiniStat icon={Percent} label="ACC" value={`${checkSummary.accuracyPct}%`} color="text-amber-400" />
               </div>
 
-              <div className="relative rounded-[20px] bg-black/20 border border-white/[0.06] p-4 pt-12 font-mono text-[10px] text-white/90 whitespace-pre-wrap break-words max-h-[320px] overflow-y-auto">
+              <div className="relative rounded-lg bg-black/20 border border-white/[0.06] p-4 pt-12 font-mono text-[10px] text-white/90 whitespace-pre-wrap break-words max-h-[320px] overflow-y-auto">
                 <button
                   type="button"
                   onClick={() => void handleCopyCheckerResult()}

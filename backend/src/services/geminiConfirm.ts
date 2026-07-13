@@ -1,6 +1,11 @@
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
+function openRouterReferer(): string {
+  const raw = process.env.FRONTEND_URL || "http://localhost:8889";
+  return raw.split(",")[0].trim().replace(/\/$/, "") || "http://localhost:8889";
+}
+
 export interface GeminiCandidate {
   pair: string;
   direction: "CALL" | "PUT";
@@ -38,22 +43,33 @@ export async function confirmSignalsWithGemini(
     direction: c.direction,
     engineConfidence: c.confidence,
     engineScore: c.engineScore,
-    reasons: c.reasons.slice(0, 4),
+    reasons: c.reasons.slice(0, 5),
   }));
 
-  const prompt = `You are an elite ${marketType} binary-options signal validator using Daisy Chain confirmation (multi-layer SMC + MSNR + MMXM + price action + parallel pair quality).
+  const prompt = `You are an elite ${marketType} 1-minute binary-options signal gatekeeper (Quotex, 1-step MTG).
 
-Review these live-engine candidates and confirm which deserve 1-minute CALL/PUT signals.
+Validate engine candidates for NEXT 1-minute candle only. Be STRICT — quality over quantity.
+
+Approve ONLY when:
+- Liquidity sweep (BSL/SSL) + wick rejection align with direction, OR
+- Opposite-candle reversal + SMC/MMXM agree on next candle, OR
+- 3+ engine reasons align (momentum + MSNR + rejection) with NO conflict.
+
+Reject when:
+- Choppy / ranging / conflicting momentum
+- Weak snapshot-only momentum without sweep or rejection
+- Direction fights opposite-candle bias
+- Engine score below 70 feel
+
 Rules:
-- Approve when liquidity sweep + wick rejection align OR 2+ engine confirmations agree.
-- Reject choppy / conflicting / weak setups.
-- geminiConfidence 72+ to approve; 82+ for premium.
-- Prefer setups where engine reasons mention wick rejection or opposite-candle next direction.
+- geminiConfidence 80+ required to approve (88+ for A+ setup)
+- Approve at most ~40% of candidates — reject the rest
+- Never approve all candidates blindly
 
 Return ONLY raw JSON:
 {
   "rankings": [
-    { "pair": "EURUSD_otc", "approved": true, "geminiConfidence": 88, "note": "short reason" }
+    { "pair": "EURUSD", "approved": true, "geminiConfidence": 86, "note": "SSL sweep + bullish rejection" }
   ]
 }
 
@@ -66,15 +82,15 @@ ${JSON.stringify(payload, null, 2)}`;
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:8889",
-        "X-Title": "Aldi Bot Signals",
+        "HTTP-Referer": openRouterReferer(),
+        "X-Title": "Nexus AI Signals",
       },
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
-        max_tokens: 1200,
-        temperature: 0.1,
+        max_tokens: 1400,
+        temperature: 0.08,
       }),
     });
 

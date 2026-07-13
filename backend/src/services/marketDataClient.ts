@@ -7,6 +7,7 @@ import {
   getCachedCandles,
   upsertSnapshotCandle,
 } from "./marketSnapshotCache.js";
+import { mergeCandlesByTimestamp } from "./yahooForexCandles.js";
 
 const MARKET_API_URL = (
   process.env.QUOTEX_MARKET_API_URL || "https://quotex-data-1n2b.onrender.com"
@@ -103,17 +104,46 @@ const TITLE_TO_PAIR: Record<string, string> = {
   GOLD: "XAUUSD",
 };
 
-async function fetchJson<T>(path: string): Promise<T | null> {
-  try {
-    const response = await fetch(`${MARKET_API_URL}${path}`, {
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as T;
-  } catch {
-    return null;
+async function fetchJson<T>(path: string, attempts = 1, timeoutMs = 8000): Promise<T | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(`${MARKET_API_URL}${path}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) {
+        if (attempt < attempts - 1) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          continue;
+        }
+        return null;
+      }
+      return (await response.json()) as T;
+    } catch {
+      if (attempt < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      return null;
+    }
   }
+  return null;
 }
+
+let cachedHealth: {
+  at: number;
+  value: {
+    status: "ok" | "offline";
+    url: string;
+    total_pairs?: number;
+    active_pairs?: number;
+    last_update?: string;
+  };
+} | null = null;
+
+const HEALTH_CACHE_MS = 25_000;
+let cachedPairs: MarketPairInfo[] = [];
+let cachedPairsAt = 0;
+const PAIRS_CACHE_MS = 20_000;
 
 function rowToPairInfo(row: MarketSnapshotRow): MarketPairInfo {
   return {
@@ -151,15 +181,20 @@ function ingestSnapshotRows(rows: MarketSnapshotRow[]): MarketPairInfo[] {
     }
   }
 
+  if (allowed.length) {
+    cachedPairs = allowed;
+    cachedPairsAt = Date.now();
+  }
+
   return allowed;
 }
 
 export async function refreshMarketSnapshots(): Promise<MarketPairInfo[]> {
-  const rows = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest");
+  const rows = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 7000);
   if (rows?.length) {
     return ingestSnapshotRows(rows);
   }
-  return [];
+  return cachedPairs;
 }
 
 export function titleToQuotexPair(
@@ -189,35 +224,70 @@ export function titleToQuotexPair(
   return mapped.replace(/_OTC$/i, "");
 }
 
-export async function checkMarketDataHealth(): Promise<{
+export async function checkMarketDataHealth(options?: {
+  force?: boolean;
+}): Promise<{
   status: "ok" | "offline";
   url: string;
   total_pairs?: number;
   active_pairs?: number;
   last_update?: string;
 }> {
+  if (
+    !options?.force &&
+    cachedHealth &&
+    Date.now() - cachedHealth.at < HEALTH_CACHE_MS
+  ) {
+    return cachedHealth.value;
+  }
+
   const health = await fetchJson<{
     status: string;
     total_pairs?: number;
     last_update?: string;
-  }>(USE_LEGACY_PATHS ? "/health" : "/api/health");
+  }>(USE_LEGACY_PATHS ? "/health" : "/api/health", 2, 6000);
 
   if (!health || health.status !== "ok") {
-    return { status: "offline", url: MARKET_API_URL };
+    const offline = { status: "offline" as const, url: MARKET_API_URL };
+    cachedHealth = { at: Date.now(), value: offline };
+    return offline;
   }
 
-  await refreshMarketSnapshots();
+  if (!cachedPairs.length || Date.now() - cachedPairsAt > PAIRS_CACHE_MS) {
+    const snapshots = await refreshMarketSnapshots();
+    if (!snapshots.length) {
+      const offline = { status: "offline" as const, url: MARKET_API_URL };
+      cachedHealth = { at: Date.now(), value: offline };
+      return offline;
+    }
+  }
 
-  return {
-    status: "ok",
+  const value = {
+    status: "ok" as const,
     url: MARKET_API_URL,
-    total_pairs: health.total_pairs,
-    active_pairs: health.total_pairs,
+    total_pairs: health.total_pairs ?? cachedPairs.length,
+    active_pairs: health.total_pairs ?? cachedPairs.length,
     last_update: health.last_update,
   };
+  cachedHealth = { at: Date.now(), value };
+  return value;
+}
+
+/** Instant readiness check using polling cache (no network if warm). */
+export function isMarketDataReady(): boolean {
+  return Boolean(
+    cachedHealth?.value.status === "ok" &&
+      Date.now() - (cachedHealth?.at ?? 0) < HEALTH_CACHE_MS * 2 &&
+      cachedPairs.length > 0
+  );
 }
 
 export async function getPairInfo(pair: string): Promise<MarketPairInfo | null> {
+  if (cachedPairs.length && Date.now() - cachedPairsAt < PAIRS_CACHE_MS) {
+    const hit =
+      cachedPairs.find((row) => row.pair.toUpperCase() === pair.toUpperCase()) ?? null;
+    if (hit) return hit;
+  }
   const pairs = await getAllPairs();
   return pairs.find((row) => row.pair.toUpperCase() === pair.toUpperCase()) ?? null;
 }
@@ -227,10 +297,25 @@ async function fetchLegacyCandles(
   limit: number
 ): Promise<MarketCandlesResponse | null> {
   return fetchJson<MarketCandlesResponse>(
-    `/last?pair=${encodeURIComponent(pair)}&n=${limit}&timestamp=1`
+    `/last?pair=${encodeURIComponent(pair)}&n=${limit}&timestamp=1`,
+    1,
+    6000
   );
 }
 
+/** Historical M1 candles from Quotex feed (works for OTC + REAL). */
+export async function fetchQuotexHistoricalCandles(
+  pair: string,
+  limit = 120
+): Promise<MarketCandle[]> {
+  const data = await fetchLegacyCandles(pair, limit);
+  return data?.candles ?? [];
+}
+
+/**
+ * Fast path for chart analysis: use in-memory candles first.
+ * Only hit remote history when local cache is too thin.
+ */
 export async function getRecentCandles(
   pair: string,
   limit = 30
@@ -244,9 +329,17 @@ export async function getRecentCandles(
 
   let candles = getCachedCandles(pair, limit);
 
-  if (candles.length < limit) {
+  if (candles.length < Math.min(8, limit)) {
     await refreshMarketSnapshots();
     candles = getCachedCandles(pair, limit);
+  }
+
+  // Only fetch remote history when we still lack enough candles (biggest latency source).
+  if (candles.length < 12) {
+    const historical = await fetchQuotexHistoricalCandles(pair, Math.min(limit, 40));
+    if (historical.length) {
+      candles = mergeCandlesByTimestamp(historical, candles);
+    }
   }
 
   if (!candles.length && info.open !== undefined) {
@@ -276,22 +369,31 @@ export async function getRecentCandles(
 
 export async function getAllPairs(): Promise<MarketPairInfo[]> {
   if (USE_LEGACY_PATHS) {
-    const rows = await fetchJson<MarketPairInfo[]>("/pairs");
+    const rows = await fetchJson<MarketPairInfo[]>("/pairs", 1, 7000);
     return (rows ?? []).filter((row) => isAllowedMarketPair(row.pair));
   }
 
-  const latest = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest");
+  if (cachedPairs.length && Date.now() - cachedPairsAt < PAIRS_CACHE_MS) {
+    return cachedPairs;
+  }
+
+  const latest = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 7000);
   if (latest?.length) {
     return ingestSnapshotRows(latest);
   }
 
+  if (cachedPairs.length) return cachedPairs;
+
   const [otc, real] = await Promise.all([
-    fetchJson<MarketSnapshotRow[]>("/api/markets/otc"),
-    fetchJson<MarketSnapshotRow[]>("/api/markets/real"),
+    fetchJson<MarketSnapshotRow[]>("/api/markets/otc", 1, 7000),
+    fetchJson<MarketSnapshotRow[]>("/api/markets/real", 1, 7000),
   ]);
 
   if (otc?.length || real?.length) {
-    return ingestSnapshotRows([...(otc ?? []), ...(real ?? [])]);
+    const allowed = ingestSnapshotRows([...(otc ?? []), ...(real ?? [])]);
+    cachedPairs = allowed;
+    cachedPairsAt = Date.now();
+    return allowed;
   }
 
   return [];
@@ -323,10 +425,10 @@ export function getMarketApiUrl(): string {
   return MARKET_API_URL;
 }
 
-export function startMarketDataPolling(intervalMs = 60_000): () => void {
-  void refreshMarketSnapshots();
+export function startMarketDataPolling(intervalMs = 30_000): () => void {
+  void checkMarketDataHealth({ force: true });
   const timer = setInterval(() => {
-    void refreshMarketSnapshots();
+    void checkMarketDataHealth({ force: true });
   }, intervalMs);
   return () => clearInterval(timer);
 }

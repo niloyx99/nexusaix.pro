@@ -388,11 +388,11 @@ export async function validateLicense(
   };
 }
 
-export async function assertLicenseForRequest(
+async function assertLicenseEligible(
   key: string,
-  incrementBy = 1,
-  deviceFingerprint = ""
-): Promise<{ license: License; usage: LicenseUsageRecord }> {
+  incrementBy: number,
+  deviceFingerprint: string
+): Promise<{ license: License; remaining: Awaited<ReturnType<typeof getRemainingUsage>> }> {
   const license = await findLicenseByKey(key);
   if (!license) {
     throw Object.assign(new Error("Invalid license key."), { status: 401, code: "LICENSE_INVALID" });
@@ -422,6 +422,27 @@ export async function assertLicenseForRequest(
     );
   }
 
+  return { license, remaining };
+}
+
+/** Validate license + daily limit without consuming a scan (for chart analyze pre-check). */
+export async function validateLicenseForRequest(
+  key: string,
+  deviceFingerprint = ""
+): Promise<{
+  license: License;
+  usage: { usedToday: number; remaining: number; totalScans: number };
+}> {
+  const { license, remaining } = await assertLicenseEligible(key, 1, deviceFingerprint);
+  return { license, usage: remaining };
+}
+
+export async function assertLicenseForRequest(
+  key: string,
+  incrementBy = 1,
+  deviceFingerprint = ""
+): Promise<{ license: License; usage: LicenseUsageRecord }> {
+  const { license } = await assertLicenseEligible(key, incrementBy, deviceFingerprint);
   const usage = await incrementUsage(license.key, incrementBy);
   return { license, usage };
 }

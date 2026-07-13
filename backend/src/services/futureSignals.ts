@@ -52,13 +52,21 @@ interface ScoredCandidate {
 }
 
 const SIGNAL_GAPS = [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20];
+/** Bangladesh / app display timezone (matches signalChecker + UI label). */
+const UTC_OFFSET_HOURS = 6;
 
 const MIN_PAYOUT_OTC = 70;
-const MIN_PAYOUT_REAL = 55;
-const MIN_ENGINE_SCORE = 58;
-const MIN_ENGINE_SCORE_STRICT = 65;
+const MIN_PAYOUT_REAL = 40;
+const MIN_PAYOUT_OTC_RELAXED = 65;
+const MIN_PAYOUT_REAL_RELAXED = 35;
+const MIN_ENGINE_SCORE = 62;
+const MIN_ENGINE_SCORE_STRICT = 70;
 const MIN_OUTPUT_CONFIDENCE = 68;
 const MIN_INTEL_CONFIDENCE = 52;
+const MIN_GEMINI_CONFIDENCE = 75;
+const ELITE_ENGINE_SCORE = 72;
+const ELITE_CONFIDENCE = 76;
+const MIN_BASIC_ENGINE = 55;
 
 function minPayoutForMarket(isOtc: boolean): number {
   return isOtc ? MIN_PAYOUT_OTC : MIN_PAYOUT_REAL;
@@ -88,20 +96,59 @@ function hasPremiumSetup(
   fromSnapshot = false
 ): boolean {
   const confirmations = countConfirmations(intel);
+
   if (intel.oppositeCandleSignal.detected && intel.liquiditySweep.detected) return true;
-  if (intel.oppositeCandleSignal.detected && intel.priceAction.rejection) return true;
-  if (fromSnapshot && intel.priceAction.rejection && intel.confidencePct >= 58) return true;
   if (
-    fromSnapshot &&
-    intel.momentum !== "NEUTRAL" &&
-    intel.nextCandleDirection !== "SIDEWAYS" &&
+    intel.oppositeCandleSignal.detected &&
+    intel.priceAction.rejection &&
+    intel.confidencePct >= 60
+  ) {
+    return true;
+  }
+  if (
+    intel.liquiditySweep.detected &&
+    intel.priceAction.rejection &&
+    confirmations >= 2 &&
     intel.confidencePct >= 58
   ) {
     return true;
   }
-  if (intel.oppositeCandleSignal.detected && confirmations >= 2) return true;
+  if (fromSnapshot) {
+    if (intel.liquiditySweep.detected && intel.priceAction.rejection) return true;
+    if (intel.oppositeCandleSignal.detected && intel.confidencePct >= 58) return true;
+    if (
+      intel.momentum !== "NEUTRAL" &&
+      intel.nextCandleDirection !== "SIDEWAYS" &&
+      intel.confidencePct >= 54
+    ) {
+      return true;
+    }
+  }
   if (confirmations >= 2 && intel.confidencePct >= MIN_INTEL_CONFIDENCE) return true;
   return false;
+}
+
+function directionMatchesIntel(
+  direction: "CALL" | "PUT",
+  intel: ReturnType<typeof analyzeMarketIntelligence>
+): boolean {
+  const expected = direction === "CALL" ? "UP" : "DOWN";
+  if (intel.nextCandleDirection !== expected) return false;
+  if (
+    intel.oppositeCandleSignal.detected &&
+    intel.oppositeCandleSignal.nextBias !== "SIDEWAYS" &&
+    intel.oppositeCandleSignal.nextBias !== expected
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isEliteCandidate(candidate: ScoredCandidate): boolean {
+  return (
+    candidate.engineScore >= ELITE_ENGINE_SCORE &&
+    candidate.confidence >= ELITE_CONFIDENCE
+  );
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -111,6 +158,79 @@ function clamp(n: number, min: number, max: number): number {
 function extractBaseCurrency(pair: string): string {
   const base = pair.replace(/_otc$/i, "");
   return base.length >= 6 ? base.slice(0, 3) : base;
+}
+
+function avg(nums: number[]): number {
+  return nums.length ? nums.reduce((sum, n) => sum + n, 0) / nums.length : 0;
+}
+
+function computeRsi(candles: Array<Pick<MarketPairInfo, never> & { close: number }>, period = 8): number | null {
+  if (candles.length < period + 1) return null;
+  const closes = candles.map((c) => Number(c.close)).filter(Number.isFinite);
+  if (closes.length < period + 1) return null;
+
+  let gains = 0;
+  let losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+
+  if (losses === 0) return 100;
+  const rs = gains / losses;
+  return 100 - 100 / (1 + rs);
+}
+
+function ema(values: number[], period: number): number | null {
+  if (values.length < period) return null;
+  const k = 2 / (period + 1);
+  let current = avg(values.slice(0, period));
+  for (let i = period; i < values.length; i++) {
+    current = values[i] * k + current * (1 - k);
+  }
+  return current;
+}
+
+function buildIndicatorConfluence(
+  candles: Array<{ close: number }>,
+  direction: "CALL" | "PUT"
+): { ok: boolean; scoreBoost: number; reasons: string[] } {
+  const closes = candles.map((c) => Number(c.close)).filter(Number.isFinite);
+  if (closes.length < 10) {
+    return { ok: true, scoreBoost: 0, reasons: [] };
+  }
+
+  const rsi = computeRsi(candles, 8);
+  const ema5 = ema(closes, 5);
+  const ema9 = ema(closes, 9);
+  const last = closes[closes.length - 1];
+  const expectedUp = direction === "CALL";
+  const reasons: string[] = [];
+  let scoreBoost = 0;
+
+  if (ema5 !== null && ema9 !== null) {
+    const emaAligned = expectedUp ? ema5 >= ema9 : ema5 <= ema9;
+    if (!emaAligned) return { ok: false, scoreBoost: -8, reasons: [] };
+    scoreBoost += 4;
+    reasons.push(expectedUp ? "EMA5 > EMA9" : "EMA5 < EMA9");
+  }
+
+  if (rsi !== null) {
+    const rsiOk = expectedUp ? rsi >= 52 && rsi <= 72 : rsi <= 48 && rsi >= 28;
+    if (!rsiOk) return { ok: false, scoreBoost: -10, reasons: [] };
+    scoreBoost += 4;
+    reasons.push(`RSI ${rsi.toFixed(0)}`);
+  }
+
+  if (ema5 !== null) {
+    const priceOk = expectedUp ? last >= ema5 : last <= ema5;
+    if (!priceOk) return { ok: false, scoreBoost: -6, reasons: [] };
+    scoreBoost += 3;
+    reasons.push(expectedUp ? "price above EMA5" : "price below EMA5");
+  }
+
+  return { ok: true, scoreBoost, reasons };
 }
 
 /**
@@ -234,7 +354,7 @@ function scorePairFromSnapshot(
   if (!hasPremiumSetup(intel, true)) return null;
 
   const direction = directionFromIntel(intel);
-  if (!direction) return null;
+  if (!direction || !directionMatchesIntel(direction, intel)) return null;
 
   const { daisyScore, engineScore, reasons } = computeDaisyScore(
     intel,
@@ -246,7 +366,7 @@ function scorePairFromSnapshot(
 
   const confidence = clamp(
     engineScore * 0.55 + daisyScore * 0.25 + intel.confidencePct * 0.2,
-    MIN_OUTPUT_CONFIDENCE,
+    MIN_OUTPUT_CONFIDENCE - 6,
     92
   );
 
@@ -265,9 +385,14 @@ function scorePairFromSnapshot(
 
 function scoreMomentumFallback(
   pairInfo: MarketPairInfo,
-  isOtc: boolean
+  isOtc: boolean,
+  relaxedPayout = false
 ): ScoredCandidate | null {
-  const minPayout = minPayoutForMarket(isOtc);
+  const minPayout = relaxedPayout
+    ? isOtc
+      ? MIN_PAYOUT_OTC_RELAXED
+      : MIN_PAYOUT_REAL_RELAXED
+    : minPayoutForMarket(isOtc);
   if (pairInfo.payout < minPayout) return null;
 
   if (
@@ -300,10 +425,10 @@ function scoreMomentumFallback(
     Math.max(pairInfo.candle_count, 1)
   );
 
-  const adjustedEngine = clamp(engineScore, MIN_ENGINE_SCORE, 84);
+  const adjustedEngine = clamp(engineScore, MIN_BASIC_ENGINE, 84);
   const confidence = clamp(
     adjustedEngine * 0.6 + intel.confidencePct * 0.25 + daisyScore * 0.15,
-    MIN_OUTPUT_CONFIDENCE,
+    MIN_OUTPUT_CONFIDENCE - 8,
     86
   );
 
@@ -360,13 +485,13 @@ async function scorePair(
       );
       if (snapDir !== "SIDEWAYS" && hasPremiumSetup(intel, true)) {
         const direction = directionFromIntel(intel);
-        if (direction) {
+        if (direction && directionMatchesIntel(direction, intel)) {
           const { daisyScore, engineScore, reasons } = computeDaisyScore(
             intel,
             pairInfo.payout,
             pairInfo.candle_count
           );
-          if (engineScore >= MIN_ENGINE_SCORE) {
+          if (engineScore >= MIN_ENGINE_SCORE_STRICT) {
             return {
               quotexPair: pairInfo.pair,
               displayPair: quotexPairToDisplay(pairInfo.pair),
@@ -400,7 +525,10 @@ async function scorePair(
   if (!hasPremiumSetup(intel)) return null;
 
   const direction = directionFromIntel(intel);
-  if (!direction) return null;
+  if (!direction || !directionMatchesIntel(direction, intel)) return null;
+
+  const indicator = buildIndicatorConfluence(candles, direction);
+  if (!indicator.ok) return null;
 
   const { daisyScore, engineScore, reasons } = computeDaisyScore(
     intel,
@@ -408,10 +536,11 @@ async function scorePair(
     pairInfo.candle_count
   );
 
-  if (engineScore < MIN_ENGINE_SCORE_STRICT) return null;
+  const adjustedEngine = clamp(engineScore + indicator.scoreBoost, 1, 99);
+  if (adjustedEngine < MIN_ENGINE_SCORE) return null;
 
-  let confidence = clamp(
-    engineScore * 0.65 +
+  const confidence = clamp(
+    adjustedEngine * 0.65 +
       daisyScore * 0.25 +
       intel.confidencePct * 0.1 +
       (intel.liquiditySweep.detected && intel.oppositeCandleSignal.detected ? 8 : 0) +
@@ -424,10 +553,10 @@ async function scorePair(
     quotexPair: pairInfo.pair,
     displayPair: quotexPairToDisplay(pairInfo.pair),
     direction,
-    engineScore,
+    engineScore: adjustedEngine,
     daisyScore,
     confidence: parseFloat(confidence.toFixed(1)),
-    reasons,
+    reasons: [...reasons, ...indicator.reasons],
     payout: pairInfo.payout,
     currencyBase: extractBaseCurrency(pairInfo.pair),
   };
@@ -454,10 +583,11 @@ async function scanPairsInBatches(
 
 async function scanMomentumFallback(
   pairs: MarketPairInfo[],
-  isOtc: boolean
+  isOtc: boolean,
+  relaxedPayout = false
 ): Promise<ScoredCandidate[]> {
   const results = pairs
-    .map((p) => scoreMomentumFallback(p, isOtc))
+    .map((p) => scoreMomentumFallback(p, isOtc, relaxedPayout))
     .filter((s): s is ScoredCandidate => s !== null);
 
   return results.sort((a, b) => {
@@ -466,51 +596,82 @@ async function scanMomentumFallback(
   });
 }
 
+function mergeCandidatePools(...pools: ScoredCandidate[][]): ScoredCandidate[] {
+  const byPair = new Map<string, ScoredCandidate>();
+  for (const pool of pools) {
+    for (const c of pool) {
+      const key = c.quotexPair.toUpperCase();
+      const existing = byPair.get(key);
+      if (!existing || c.engineScore > existing.engineScore) {
+        byPair.set(key, c);
+      }
+    }
+  }
+  return [...byPair.values()].sort((a, b) => {
+    if (b.engineScore !== a.engineScore) return b.engineScore - a.engineScore;
+    return b.confidence - a.confidence;
+  });
+}
+
+function pickFromTiers(tiers: ScoredCandidate[][], count: number): ScoredCandidate[] {
+  const picked: ScoredCandidate[] = [];
+  const usedPairs = new Set<string>();
+
+  for (const tier of tiers) {
+    if (picked.length >= count) break;
+    const need = count - picked.length;
+    const batch = diversifyCandidates(
+      tier.filter((c) => !usedPairs.has(c.quotexPair.toUpperCase())),
+      need
+    );
+    for (const c of batch) {
+      const key = c.quotexPair.toUpperCase();
+      if (usedPairs.has(key)) continue;
+      picked.push(c);
+      usedPairs.add(key);
+      if (picked.length >= count) break;
+    }
+  }
+
+  return picked.slice(0, count);
+}
+
 function buildFinalCandidates(
   scored: ScoredCandidate[],
   req: GenerateSignalsRequest,
   gemini: Awaited<ReturnType<typeof confirmSignalsWithGemini>>
 ): ScoredCandidate[] {
-  if (gemini.status !== "ok" || gemini.rankings.length === 0) {
-    return diversifyCandidates(scored, req.count).map((c) => ({
-      ...c,
-      reasons: [...c.reasons, "Engine-confirmed live setup"],
-    }));
-  }
-
-  const approvedMap = new Map(
-    gemini.rankings
-      .filter((r) => r.approved)
-      .map((r) => [r.pair.toUpperCase(), r])
+  const elite = scored.filter(isEliteCandidate);
+  const standard = scored.filter(
+    (c) => c.engineScore >= MIN_ENGINE_SCORE && c.confidence >= MIN_OUTPUT_CONFIDENCE - 4
   );
 
-  let finalCandidates = scored
-    .filter((c) => approvedMap.has(c.quotexPair.toUpperCase()))
-    .map((c) => {
-      const g = approvedMap.get(c.quotexPair.toUpperCase())!;
-      return {
-        ...c,
-        confidence: parseFloat(
-          clamp(c.confidence * 0.55 + g.geminiConfidence * 0.45, MIN_OUTPUT_CONFIDENCE, 97).toFixed(1)
-        ),
-        reasons: [...c.reasons, `Gemini: ${g.note}`],
-      };
-    });
-
-  if (finalCandidates.length < req.count) {
-    const enginePicks = scored.filter(
-      (c) => c.engineScore >= MIN_ENGINE_SCORE && c.confidence >= MIN_OUTPUT_CONFIDENCE
+  let geminiApproved: ScoredCandidate[] = [];
+  if (gemini.status === "ok" && gemini.rankings.length > 0) {
+    const approvedMap = new Map(
+      gemini.rankings
+        .filter((r) => r.approved && r.geminiConfidence >= MIN_GEMINI_CONFIDENCE)
+        .map((r) => [r.pair.toUpperCase(), r])
     );
-    const pool = enginePicks.length > 0 ? enginePicks : scored;
-    finalCandidates = diversifyCandidates(pool, req.count).map((c) => ({
-      ...c,
-      reasons: [...c.reasons, finalCandidates.length ? "Engine top pick" : "Live momentum pick"],
-    }));
-  } else {
-    finalCandidates = diversifyCandidates(finalCandidates, req.count);
+
+    geminiApproved = scored
+      .filter((c) => approvedMap.has(c.quotexPair.toUpperCase()))
+      .map((c) => {
+        const g = approvedMap.get(c.quotexPair.toUpperCase())!;
+        return {
+          ...c,
+          confidence: parseFloat(
+            clamp(c.confidence * 0.4 + g.geminiConfidence * 0.6, MIN_OUTPUT_CONFIDENCE, 97).toFixed(1)
+          ),
+          reasons: [...c.reasons, `Gemini ✓ ${g.note}`],
+        };
+      });
   }
 
-  return finalCandidates.slice(0, req.count);
+  return pickFromTiers(
+    [geminiApproved, elite, standard, scored],
+    req.count
+  );
 }
 
 function diversifyCandidates(
@@ -518,20 +679,29 @@ function diversifyCandidates(
   limit: number
 ): ScoredCandidate[] {
   const picked: ScoredCandidate[] = [];
+  const usedPairs = new Set<string>();
   const usedBases = new Set<string>();
+  const canDiversify = ranked.length > limit;
 
   for (const c of ranked) {
     if (picked.length >= limit) break;
-    if (usedBases.has(c.currencyBase) && picked.length < limit - 2) continue;
+    const pairKey = c.quotexPair.toUpperCase();
+    if (usedPairs.has(pairKey)) continue;
+    if (canDiversify && usedBases.has(c.currencyBase) && picked.length < limit - 1) {
+      continue;
+    }
     picked.push(c);
+    usedPairs.add(pairKey);
     usedBases.add(c.currencyBase);
   }
 
   if (picked.length < limit) {
     for (const c of ranked) {
       if (picked.length >= limit) break;
-      if (!picked.find((p) => p.quotexPair === c.quotexPair)) {
+      const pairKey = c.quotexPair.toUpperCase();
+      if (!usedPairs.has(pairKey)) {
         picked.push(c);
+        usedPairs.add(pairKey);
       }
     }
   }
@@ -541,13 +711,14 @@ function diversifyCandidates(
 
 function scheduleSignalTimes(count: number): string[] {
   const times: string[] = [];
-  let cursor = new Date();
+  // Shift into UTC+6 so displayed times match the user's local clock (not server UTC).
+  let cursor = new Date(Date.now() + UTC_OFFSET_HOURS * 3600 * 1000);
 
   for (let i = 0; i < count; i++) {
     const gap = SIGNAL_GAPS[Math.min(i, SIGNAL_GAPS.length - 1)];
     cursor = new Date(cursor.getTime() + gap * 60 * 1000);
-    const hh = String(cursor.getHours()).padStart(2, "0");
-    const mm = String(cursor.getMinutes()).padStart(2, "0");
+    const hh = String(cursor.getUTCHours()).padStart(2, "0");
+    const mm = String(cursor.getUTCMinutes()).padStart(2, "0");
     times.push(`${hh}:${mm}`);
   }
 
@@ -592,8 +763,14 @@ export async function generateFutureSignals(
 
   let scored = await scanPairsInBatches(filtered, isOtc);
 
-  if (scored.length === 0) {
-    scored = await scanMomentumFallback(filtered, isOtc);
+  if (scored.length < req.count) {
+    const momentum = await scanMomentumFallback(filtered, isOtc);
+    scored = mergeCandidatePools(scored, momentum);
+  }
+
+  if (scored.length < req.count) {
+    const relaxed = await scanMomentumFallback(filtered, isOtc, true);
+    scored = mergeCandidatePools(scored, relaxed);
   }
 
   if (scored.length === 0) {
@@ -603,11 +780,11 @@ export async function generateFutureSignals(
       signals: [],
       scannedPairs: filtered.length,
       geminiStatus: "fallback",
-      message: "No clear directional setups right now — try again in 1–2 minutes",
+      message: "No directional setups right now — try again in 1–2 minutes",
     };
   }
 
-  const geminiPool = diversifyCandidates(scored, Math.min(req.count * 3, 15));
+  const geminiPool = diversifyCandidates(scored, Math.min(req.count * 2, 20));
 
   const geminiCandidates: GeminiCandidate[] = geminiPool.map((c) => ({
     pair: c.quotexPair,
@@ -619,7 +796,8 @@ export async function generateFutureSignals(
 
   const gemini = await confirmSignalsWithGemini(geminiCandidates, req.marketType);
   const finalCandidates = buildFinalCandidates(scored, req, gemini);
-  const times = scheduleSignalTimes(finalCandidates.length);
+
+  const times = scheduleSignalTimes(req.count);
 
   const signals: FutureSignal[] = finalCandidates.map((c, i) => ({
     id: `sig-${Date.now()}-${i}`,

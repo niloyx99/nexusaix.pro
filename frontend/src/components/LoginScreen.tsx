@@ -145,7 +145,7 @@ export default function LoginScreen({ onActivate }: LoginScreenProps) {
             exit={{ opacity: 0, y: -15 }}
             className="space-y-6"
           >
-            <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.25)] px-3.5 py-3.5 select-none">
+            <div className="relative overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.25)] px-3.5 py-3.5 select-none">
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/[0.06] via-transparent to-white/[0.04]" />
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
               <div className="relative flex items-center justify-between gap-2.5">
@@ -170,7 +170,7 @@ export default function LoginScreen({ onActivate }: LoginScreenProps) {
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                className="p-3.5 rounded-2xl bg-rose-500/20 border border-rose-500/35 text-rose-300 text-[11px] font-bold flex items-start space-x-2 shadow-[0_4px_12px_rgba(244,63,94,0.1)]"
+                className="p-3.5 rounded-lg bg-rose-500/20 border border-rose-500/35 text-rose-300 text-[11px] font-bold flex items-start space-x-2 shadow-[0_4px_12px_rgba(244,63,94,0.1)]"
               >
                 <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <span className="flex-1 leading-normal">{error}</span>

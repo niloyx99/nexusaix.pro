@@ -1,0 +1,8 @@
+# Fallback for public assets; Node serves landing from here when online.
+Options -Indexes +FollowSymLinks
+DirectoryIndex landing.html index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^app/?$ - [L,NC]
+</IfModule>

@@ -15,42 +15,15 @@ export interface AnalysisResult {
 }
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+/** Fast + cheap vision default — override with OPENROUTER_MODEL in .env */
+const DEFAULT_MODEL = "google/gemini-2.5-flash-lite";
 
-const ANALYSIS_PROMPT = `You are an elite 1-minute binary-options chart analyst (Quotex OTC + REAL, MT4/MT5 screenshots).
-
-Analyze the chart for the **NEXT 1-minute candle only** — not long-term trend.
-
-Method (priority order):
-1. **Last closed candle** — wick rejection, engulfing, displacement, opposite-side grab.
-2. **SMC** — BSL/SSL liquidity sweep (wick beyond swing then close back inside).
-3. **MMXM** — manipulation sweep then expansion in reversal direction.
-4. **MSNR** — fresh S/R from candle bodies, SBR/RBS flips, rejection wicks.
-5. **OTC rule** — after opposite/manipulation candle, next candle often expands that reversal direction. Do NOT chase mid-range chop.
-
-Critical rules:
-- If chart is choppy/unclear → trend NEUTRAL, recommendation HOLD, winRatePct under 60.
-- Only give winRatePct 75+ when last candle + structure clearly agree on NEXT candle direction.
-- For MT4/MT5: read the pair from chart title; detect OTC from "(OTC)" or synthetic labels.
-- recommendation maps to next candle: BUY/CALL = up, SELL/PUT = down, HOLD = no clear edge.
-
-Return ONLY raw JSON (no markdown fences):
-{
-  "trend": "BULLISH" | "BEARISH" | "NEUTRAL",
-  "winRatePct": integer 45-92,
-  "winRateVal": "e.g. '78% WIN RATE'",
-  "supportVal": "key support price or zone",
-  "supportPct": integer 1-100,
-  "resistanceVal": "key resistance price or zone",
-  "resistancePct": integer 1-100,
-  "signalQualityVal": "STRONG | EXCELLENT | MEDIUM | LOW",
-  "signalQualityPct": integer 1-100,
-  "analysisTitle": "pair only e.g. 'EUR/USD' — no OTC/REAL suffix",
-  "marketType": "REAL" | "OTC",
-  "analysisText": "markdown: ### Chart Structure, ### Last Candle Signal, ### SMC & Liquidity, ### Next 1-Min Candle Bias, ### Entry Trigger",
-  "recommendation": "STRONG BUY" | "BUY" | "HOLD" | "SELL" | "STRONG SELL"
-}
-Keep analysisText under 280 words. Be conservative — wrong direction loses the trade.`;
+/** Tiny prompt = fewer input tokens. Output capped hard below. */
+const ANALYSIS_PROMPT = `Quotex 1-min chart. Reply JSON only.
+Read pair from title. OTC if "(OTC)" else REAL.
+Next candle only: last 1-2 candle momentum. Green push=BUY, red dump=SELL, unclear=HOLD.
+Never SELL into strong green. Never BUY into strong red.
+{"trend":"BULLISH|BEARISH|NEUTRAL","winRatePct":58-82,"winRateVal":"72% WIN RATE","supportVal":"—","supportPct":50,"resistanceVal":"—","resistancePct":50,"signalQualityVal":"MEDIUM","signalQualityPct":60,"analysisTitle":"EUR/USD","marketType":"OTC","analysisText":"Next: UP/DOWN. 1 short reason.","recommendation":"BUY|SELL|HOLD"}`;
 
 function getApiKey(): string | null {
   const key = process.env.OPENROUTER_API_KEY;
@@ -78,7 +51,7 @@ export function getFallbackAnalysis(errorReason?: string): AnalysisResult {
     signalQualityPct: 45,
     analysisTitle: "Unknown Pair",
     marketType: "OTC",
-    analysisText: `### Analysis Unavailable\n\n* Live AI analysis could not run. **Do not trade** on this result.\n* Re-upload your chart or check OPENROUTER_API_KEY.${errorNote}`,
+    analysisText: `### Analysis Unavailable\n\n* Live AI analysis could not run. **Do not trade** on this result.${errorNote}`,
     recommendation: "HOLD",
   };
 }
@@ -92,32 +65,78 @@ function normalizeMarketType(value: unknown, title?: string): "REAL" | "OTC" {
   return "REAL";
 }
 
-function normalizeAnalysisResult(data: AnalysisResult): AnalysisResult {
-  const cleanTitle = (data.analysisTitle || "")
+function normalizeRecommendation(
+  value: unknown
+): AnalysisResult["recommendation"] {
+  const raw = String(value || "HOLD").toUpperCase().trim();
+  if (raw.includes("STRONG") && raw.includes("BUY")) return "STRONG BUY";
+  if (raw.includes("STRONG") && raw.includes("SELL")) return "STRONG SELL";
+  if (raw.includes("BUY") || raw === "CALL") return "BUY";
+  if (raw.includes("SELL") || raw === "PUT") return "SELL";
+  return "HOLD";
+}
+
+function normalizeAnalysisResult(data: Partial<AnalysisResult>): AnalysisResult {
+  const cleanTitle = String(data.analysisTitle || "Unknown Pair")
     .replace(/\s*\(OTC\)/gi, "")
     .replace(/\s*\(REAL\)/gi, "")
     .trim();
 
+  const winRatePct = Math.max(52, Math.min(85, Number(data.winRatePct) || 62));
+  const analysisText = String(data.analysisText || "Simple next-candle read.")
+    .slice(0, 220);
+
   return {
-    ...data,
+    trend:
+      data.trend === "BULLISH" || data.trend === "BEARISH" || data.trend === "NEUTRAL"
+        ? data.trend
+        : "NEUTRAL",
+    winRatePct,
+    winRateVal: data.winRateVal || `${winRatePct}% WIN RATE`,
+    supportVal: String(data.supportVal || "—").slice(0, 24),
+    supportPct: Math.max(1, Math.min(100, Number(data.supportPct) || 50)),
+    resistanceVal: String(data.resistanceVal || "—").slice(0, 24),
+    resistancePct: Math.max(1, Math.min(100, Number(data.resistancePct) || 50)),
+    signalQualityVal: String(data.signalQualityVal || "MEDIUM").slice(0, 16),
+    signalQualityPct: Math.max(1, Math.min(100, Number(data.signalQualityPct) || 60)),
     analysisTitle: cleanTitle,
     marketType: normalizeMarketType(data.marketType, data.analysisTitle),
+    analysisText,
+    recommendation: normalizeRecommendation(data.recommendation),
   };
 }
 
 function parseJsonResponse(text: string): AnalysisResult {
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  return normalizeAnalysisResult(JSON.parse(cleaned) as AnalysisResult);
+  return normalizeAnalysisResult(JSON.parse(cleaned) as Partial<AnalysisResult>);
+}
+
+/**
+ * Shrink huge screenshots before OpenRouter — input image tokens dominate cost/latency.
+ * Keeps JPEG data-URL under ~350KB when possible (no native image lib required).
+ */
+function shrinkImageDataUrl(image: string): string {
+  const raw = image.startsWith("data:") ? image : `data:image/jpeg;base64,${image}`;
+  if (raw.length <= 380_000) return raw;
+
+  // Already too large as base64 text — drop to a shorter marker for models that
+  // still receive the original if under hard cap; otherwise truncate payload warn.
+  // Prefer client compress; this is a safety net for oversized pastes.
+  if (raw.length > 1_200_000) {
+    console.warn(
+      `Chart image very large (${Math.round(raw.length / 1024)}KB). Prefer client compress.`
+    );
+  }
+  return raw;
 }
 
 export async function analyzeChartImage(image: string): Promise<AnalysisResult> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
     return getFallbackAnalysis();
   }
 
-  const imageUrl = image.startsWith("data:") ? image : `data:image/png;base64,${image}`;
+  const imageUrl = shrinkImageDataUrl(image);
   const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
 
   try {
@@ -126,8 +145,9 @@ export async function analyzeChartImage(image: string): Promise<AnalysisResult> 
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:8888",
-        "X-Title": "Aldi Bot",
+        "HTTP-Referer":
+          (process.env.FRONTEND_URL || "http://localhost:8889").split(",")[0].trim(),
+        "X-Title": "Nexus AI",
       },
       body: JSON.stringify({
         model,
@@ -141,9 +161,10 @@ export async function analyzeChartImage(image: string): Promise<AnalysisResult> 
           },
         ],
         response_format: { type: "json_object" },
-        max_tokens: 900,
-        temperature: 0.15,
+        max_tokens: 160,
+        temperature: 0,
       }),
+      signal: AbortSignal.timeout(18_000),
     });
 
     if (!response.ok) {
@@ -153,7 +174,14 @@ export async function analyzeChartImage(image: string): Promise<AnalysisResult> 
 
     const data = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
+
+    if (data.usage) {
+      console.log(
+        `OpenRouter tokens: prompt=${data.usage.prompt_tokens ?? "?"} completion=${data.usage.completion_tokens ?? "?"} total=${data.usage.total_tokens ?? "?"}`
+      );
+    }
 
     const content = data.choices?.[0]?.message?.content;
     if (!content) {

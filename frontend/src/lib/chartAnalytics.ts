@@ -1,5 +1,5 @@
 import { getLicenseHeaders } from './nexusUser';
-import { apiUrl } from './api';
+import { apiUrl, fetchWithRetry } from './api';
 
 export interface ChartAnalyticsData {
   total: number;
@@ -32,7 +32,7 @@ export interface ChartAnalyticsData {
 }
 
 export async function fetchChartAnalytics(): Promise<ChartAnalyticsData> {
-  const res = await fetch(apiUrl('/api/analytics/chart'), {
+  const res = await fetchWithRetry(apiUrl('/api/analytics/chart'), {
     headers: getLicenseHeaders(),
   });
   const payload = await res.json();

@@ -7,15 +7,11 @@ import {
 } from "./openrouter.js";
 
 import {
-
   checkMarketDataHealth,
-
   getPairInfo,
-
   getRecentCandles,
-
+  isMarketDataReady,
   titleToQuotexPair,
-
 } from "./marketDataClient.js";
 import { isAllowedMarketPair } from "../config/allowedMarkets.js";
 
@@ -93,6 +89,11 @@ function clamp(n: number, min = 1, max = 99): number {
 
 }
 
+/** User-facing win rate — never fake 99%, not stuck at flat 50. */
+function clampWinRate(n: number): number {
+  return clamp(n, 48, 88);
+}
+
 
 
 function trendToDirection(trend: AnalysisResult["trend"]): Direction {
@@ -139,159 +140,231 @@ function fuseRecommendation(
 
   fusedDirection: Direction,
 
-  fusionConfidence: number
+  fusionConfidence: number,
+
+  isOtc = false
 
 ): AnalysisResult["recommendation"] {
 
-  const bullish =
+  let direction: Direction = fusedDirection;
 
-    fusedDirection === "UP" ||
-
-    (gemini.trend === "BULLISH" && fusedDirection !== "DOWN");
-
-  const bearish =
-
-    fusedDirection === "DOWN" ||
-
-    (gemini.trend === "BEARISH" && fusedDirection !== "UP");
+  // Do not invent BUY/SELL from weak chart trend alone — that caused extra losses.
+  if (direction === "SIDEWAYS" && intel?.nextCandleDirection && intel.nextCandleDirection !== "SIDEWAYS") {
+    if (intel.confidencePct >= (isOtc ? 66 : 60)) {
+      direction = intel.nextCandleDirection;
+    }
+  }
 
 
+
+  const minConfidence = isOtc ? 66 : 60;
+
+  const bullish = direction === "UP";
+  const bearish = direction === "DOWN";
 
   const strong =
+    fusionConfidence >= 80 &&
+    direction !== "SIDEWAYS" &&
+    Boolean(intel?.liquiditySweep.detected && intel?.oppositeCandleSignal.detected);
 
-    fusionConfidence >= 82 &&
-
-    fusedDirection !== "SIDEWAYS" &&
-
-    (intel?.liquiditySweep.detected || intel?.oppositeCandleSignal.detected || gemini.recommendation.includes("STRONG"));
-
-
-
-  if (fusedDirection === "SIDEWAYS" || fusionConfidence < 62) {
-
+  // Simple gate: unclear / weak / conflict → HOLD (fewer losses than forced trades)
+  if (direction === "SIDEWAYS" || fusionConfidence < minConfidence) {
     return "HOLD";
-
   }
 
   if (bullish && !bearish) {
-
     return strong ? "STRONG BUY" : "BUY";
-
   }
 
   if (bearish && !bullish) {
-
     return strong ? "STRONG SELL" : "SELL";
-
   }
 
   return "HOLD";
+}
+
+
+
+function applyOtcSafetyGate(
+
+  isOtc: boolean,
+
+  intel: MarketIntelligence | null,
+
+  direction: Direction,
+
+  confidence: number
+
+): { direction: Direction; confidence: number } {
+
+  if (!isOtc || !intel || direction === "SIDEWAYS") {
+
+    return { direction, confidence };
+
+  }
+
+
+
+  let nextDirection = direction;
+
+  let nextConfidence = confidence;
+
+  const live = intel.nextCandleDirection;
+
+  const insight = intel.otcInsight.toLowerCase();
+
+
+
+  // OTC: follow live expansion / last-candle push — do not fight V-recoveries.
+  if (insight.includes("bullish expansion")) {
+
+    if (nextDirection === "DOWN") {
+
+      return { direction: live === "UP" ? "UP" : "SIDEWAYS", confidence: Math.min(nextConfidence, live === "UP" ? 72 : 45) };
+
+    }
+
+    if (live === "UP") {
+
+      nextDirection = "UP";
+
+      nextConfidence = Math.max(nextConfidence, 70);
+
+    }
+
+  }
+
+  if (insight.includes("bearish expansion")) {
+
+    if (nextDirection === "UP") {
+
+      return { direction: live === "DOWN" ? "DOWN" : "SIDEWAYS", confidence: Math.min(nextConfidence, live === "DOWN" ? 72 : 45) };
+
+    }
+
+    if (live === "DOWN") {
+
+      nextDirection = "DOWN";
+
+      nextConfidence = Math.max(nextConfidence, 70);
+
+    }
+
+  }
+
+
+
+  // Live feed wins over chart-only SELL when momentum is already UP (common MTG loss case).
+  if (nextDirection === "DOWN" && (intel.momentum === "BULLISH" || live === "UP")) {
+
+    if (live === "UP" && intel.confidencePct >= 58) {
+
+      return { direction: "UP", confidence: Math.max(62, Math.min(88, intel.confidencePct)) };
+
+    }
+
+    return { direction: "SIDEWAYS", confidence: Math.min(nextConfidence, 46) };
+
+  }
+
+  if (nextDirection === "UP" && (intel.momentum === "BEARISH" || live === "DOWN")) {
+
+    if (live === "DOWN" && intel.confidencePct >= 58) {
+
+      return { direction: "DOWN", confidence: Math.max(62, Math.min(88, intel.confidencePct)) };
+
+    }
+
+    return { direction: "SIDEWAYS", confidence: Math.min(nextConfidence, 46) };
+
+  }
+
+
+
+  if (
+
+    live !== "SIDEWAYS" &&
+
+    live !== nextDirection &&
+
+    intel.confidencePct >= 62
+
+  ) {
+
+    return { direction: live, confidence: Math.max(60, Math.min(90, intel.confidencePct)) };
+
+  }
+
+
+
+  return { direction: nextDirection, confidence: nextConfidence };
 
 }
 
 
 
 function buildFusionConfidence(
-
   gemini: AnalysisResult,
-
   intel: MarketIntelligence | null,
-
   marketOk: boolean,
-
   payout: number | null,
-
   fusedDirection: Direction,
-
   candlesUsed: number,
-
   directionsConflict: boolean
-
 ): number {
-
   const thinData = candlesUsed < 8;
   const geminiDir = geminiTradeDirection(gemini);
 
-  let score = thinData
-    ? gemini.winRatePct * 0.72
-    : gemini.winRatePct * 0.42;
+  // Chart + live blend (mid-range base). Old code stacked +40 bonuses → always 99%.
+  const chart = clamp(gemini.winRatePct, 52, 82);
+  const live = intel ? clamp(intel.confidencePct, 52, 84) : 58;
 
+  let score =
+    marketOk && intel
+      ? thinData
+        ? chart * 0.62 + live * 0.38
+        : chart * 0.42 + live * 0.58
+      : chart * 0.9;
 
-
+  let bonus = 0;
   if (marketOk && intel) {
-
-    score += thinData
-      ? intel.confidencePct * 0.18
-      : intel.confidencePct * 0.38;
-
-
-
-    if (directionsAlign(geminiDir, intel.nextCandleDirection)) score += thinData ? 12 : 14;
-
-    if (directionsAlign(geminiDir, fusedDirection)) score += 8;
-
-    if (directionsAlign(intel.nextCandleDirection, fusedDirection)) score += thinData ? 6 : 10;
-
-
-
+    if (directionsAlign(geminiDir, intel.nextCandleDirection)) bonus += 4;
+    if (directionsAlign(geminiDir, fusedDirection)) bonus += 3;
+    if (directionsAlign(intel.nextCandleDirection, fusedDirection)) bonus += 3;
     if (
-
       (gemini.trend === "BULLISH" && intel.momentum === "BULLISH") ||
-
       (gemini.trend === "BEARISH" && intel.momentum === "BEARISH")
-
     ) {
-
-      score += 6;
-
-    } else if (intel.momentum === "NEUTRAL") {
-
-      score += 1;
-
-    } else if (!thinData) {
-
-      score -= 14;
-
+      bonus += 3;
+    } else if (
+      geminiDir !== "SIDEWAYS" &&
+      intel.momentum !== "NEUTRAL" &&
+      !directionsAlign(geminiDir, intel.nextCandleDirection)
+    ) {
+      bonus -= 6;
     }
 
-
-
-    if (intel.liquiditySweep.detected) score += thinData ? 5 : 8;
-
-    if (intel.oppositeCandleSignal.detected) score += thinData ? 5 : 7;
-
-    if (intel.liquiditySweep.detected && intel.oppositeCandleSignal.detected) score += 8;
-
-    if (intel.mmxm.phase === "MANIPULATION") score += 5;
-
-    if (intel.priceAction.rejection) score += 4;
-
-    if (intel.msnr.signal !== "NONE") score += 3;
-
+    if (intel.liquiditySweep.detected && intel.oppositeCandleSignal.detected) bonus += 4;
+    else if (intel.liquiditySweep.detected || intel.oppositeCandleSignal.detected) bonus += 2;
+    if (intel.priceAction.rejection) bonus += 2;
   } else if (!thinData) {
-
-    score -= 12;
-
+    bonus -= 6;
   }
 
+  // Cap total bonus so scores spread across 55–85 instead of slamming into 99.
+  bonus = Math.max(-12, Math.min(bonus, 11));
+  score += bonus;
 
+  if (directionsConflict) score -= 9;
+  if (fusedDirection === "SIDEWAYS") score = Math.min(score, 56);
+  if (gemini.recommendation === "HOLD" && gemini.trend === "NEUTRAL") {
+    score = Math.min(score, 54);
+  }
 
-  if (directionsConflict) score -= 22;
+  if (payout && payout >= 80) score += 1;
+  if (payout && payout > 0 && payout < 55) score -= 3;
 
-  if (fusedDirection === "SIDEWAYS") score = Math.min(score, 58);
-
-  if (gemini.recommendation === "HOLD") score = Math.min(score, 62);
-
-
-
-  if (payout && payout >= 80) score += 3;
-
-  if (payout && payout > 0 && payout < 55) score -= 8;
-
-
-
-  return clamp(score);
-
+  return clampWinRate(score);
 }
 
 
@@ -304,15 +377,39 @@ function resolveFusedDirection(
 
   candlesUsed: number,
 
-  snapshot?: { open: number; high: number; low: number; close: number } | null
+  snapshot?: { open: number; high: number; low: number; close: number } | null,
+
+  isOtc = false
 
 ): { direction: Direction; conflict: boolean } {
 
   const geminiDir = geminiTradeDirection(gemini);
   const thinData = candlesUsed < 8;
 
-  if (gemini.recommendation === "HOLD" || geminiDir === "SIDEWAYS") {
+  // OTC: live market momentum first — chart trend alone caused many wrong SELL/MTG losses.
+  if (isOtc && intel && intel.nextCandleDirection !== "SIDEWAYS" && intel.confidencePct >= 58) {
+    if (geminiDir === "SIDEWAYS" || geminiDir === intel.nextCandleDirection) {
+      return { direction: intel.nextCandleDirection, conflict: false };
+    }
+    if (intel.otcInsight.toLowerCase().includes("expansion")) {
+      return { direction: intel.nextCandleDirection, conflict: true };
+    }
+    // Prefer live when confidence is clearly higher than chart win-rate guess.
+    if (intel.confidencePct >= gemini.winRatePct + 4) {
+      return { direction: intel.nextCandleDirection, conflict: true };
+    }
+  }
+
+  if (geminiDir === "SIDEWAYS") {
+
+    if (intel?.nextCandleDirection && intel.nextCandleDirection !== "SIDEWAYS") {
+
+      return { direction: intel.nextCandleDirection, conflict: false };
+
+    }
+
     return { direction: "SIDEWAYS", conflict: false };
+
   }
 
   if (!intel || thinData) {
@@ -379,41 +476,27 @@ function mergeAnalysisText(
 
 ): string {
 
-  if (!intel) return geminiText;
+  const shortGemini = (geminiText || "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\n+/g, " ")
+    .trim()
+    .slice(0, 140);
 
+  if (!intel) {
+    return `### Simple Signal\n* **${quotexPair}** → **${fusedDirection}** (${fusionConfidence}%)\n* ${shortGemini || "Chart-only read."}`;
+  }
 
-
-  const fusionSection = [
-
-    "### Fusion Verdict (Gemini + Live Quotex Data)",
-
-    `* **Pair**: ${quotexPair} | **Payout**: ${payout ? `${payout}%` : "N/A"}`,
-
-    `* **Next candle direction**: **${fusedDirection}**`,
-
-    `* **Fusion confidence**: **${fusionConfidence}%**${directionsConflict ? " *(chart vs live conflict — reduced)*" : ""}`,
-
-    `* **SMC liquidity**: ${intel.liquiditySweep.detected ? intel.liquiditySweep.type.replace("_", " ") : "No sweep"} — ${intel.liquiditySweep.description}`,
-
-    `* **MMXM**: ${intel.mmxm.model !== "NONE" ? intel.mmxm.model : "Scanning"} (${intel.mmxm.phase}) — ${intel.mmxm.description}`,
-
-    `* **MSNR (Malaysian SNR)**: ${intel.msnr.signal} — ${intel.msnr.description}`,
-
-    `* **Price action**: ${intel.priceAction.pattern} — ${intel.priceAction.description}`,
-
-    `* **Opposite-candle reversal**: ${intel.oppositeCandleSignal.detected ? `YES → **${intel.oppositeCandleSignal.nextBias}**` : "No"} — ${intel.oppositeCandleSignal.description}`,
-
-    `* **OTC insight**: ${intel.otcInsight}`,
-
-  ].join("\n");
-
-
-
-  return `${geminiText}\n\n${fusionSection}\n\n${intel.summaryMarkdown}`;
-
+  return [
+    "### Simple Signal",
+    `* **Pair**: ${quotexPair}${payout ? ` · Payout ${payout}%` : ""}`,
+    `* **Next candle**: **${fusedDirection}** · **${fusionConfidence}%**${directionsConflict ? " (conflict → careful)" : ""}`,
+    `* **Live**: ${intel.momentum} · ${intel.nextCandleDirection}`,
+    shortGemini ? `* **Chart**: ${shortGemini}` : null,
+    fusionConfidence < 66 ? `* **Tip**: Confidence low — prefer HOLD / skip MTG.` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
-
-
 
 function alignKpiWithFusion(
 
@@ -533,6 +616,23 @@ export async function analyzeWithFusion(
 
   const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
 
+  const health = await checkMarketDataHealth({ force: !isMarketDataReady() });
+
+  const marketApiUrl =
+
+    health.url || process.env.QUOTEX_MARKET_API_URL || "https://quotex-data-1n2b.onrender.com";
+
+  if (health.status !== "ok") {
+
+    throw Object.assign(new Error("Market data feed offline"), {
+
+      code: "MARKET_DATA_OFFLINE",
+
+    });
+
+  }
+
+  // Vision call only after market feed is confirmed (saves Gemini tokens on offline).
   const gemini = await analyzeChartImage(image);
 
   const geminiIsFallback = gemini.analysisText.includes("Simulation mode");
@@ -546,14 +646,6 @@ export async function analyzeWithFusion(
     gemini.marketType
 
   );
-
-
-
-  const health = await checkMarketDataHealth();
-
-  const marketApiUrl =
-
-    health.url || process.env.QUOTEX_MARKET_API_URL || "https://quotex-data-1n2b.onrender.com";
 
 
 
@@ -582,7 +674,7 @@ export async function analyzeWithFusion(
 
     pairInfo = await getPairInfo(quotexPair);
 
-    const candleData = await getRecentCandles(quotexPair, 60);
+    const candleData = await getRecentCandles(quotexPair, 30);
 
 
 
@@ -669,10 +761,13 @@ export async function analyzeWithFusion(
         }
       : null;
 
-  const { direction: fusedDirection, conflict: directionsConflict } =
-    resolveFusedDirection(gemini, intel, candlesUsed, snapshot);
+  const isOtcMarket =
+    gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
 
-  const fusionConfidencePct = buildFusionConfidence(
+  const { direction: fusedDirection, conflict: directionsConflict } =
+    resolveFusedDirection(gemini, intel, candlesUsed, snapshot, isOtcMarket);
+
+  let fusionConfidencePct = buildFusionConfidence(
 
     gemini,
 
@@ -690,6 +785,10 @@ export async function analyzeWithFusion(
 
   );
 
+  const otcGate = applyOtcSafetyGate(isOtcMarket, intel, fusedDirection, fusionConfidencePct);
+  const safeDirection = otcGate.direction;
+  fusionConfidencePct = clampWinRate(otcGate.confidence);
+
 
 
   const recommendation = fuseRecommendation(
@@ -698,9 +797,11 @@ export async function analyzeWithFusion(
 
     intel,
 
-    fusedDirection,
+    safeDirection,
 
-    fusionConfidencePct
+    fusionConfidencePct,
+
+    isOtcMarket
 
   );
 
@@ -712,7 +813,7 @@ export async function analyzeWithFusion(
 
     intel,
 
-    fusedDirection,
+    safeDirection,
 
     fusionConfidencePct
 
@@ -726,7 +827,7 @@ export async function analyzeWithFusion(
 
     intel,
 
-    fusedDirection,
+    safeDirection,
 
     fusionConfidencePct,
 
@@ -752,7 +853,7 @@ export async function analyzeWithFusion(
 
     winRateVal: `${fusionConfidencePct}% WIN RATE`,
 
-    nextCandleDirection: fusedDirection,
+    nextCandleDirection: safeDirection,
 
     fusionConfidencePct,
 

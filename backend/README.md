@@ -1,54 +1,32 @@
-# Nexus AI — Backend API
+# Nexus AI — Backend (Render)
 
-API-only server. Frontend and admin are **hosted separately** and connect via `VITE_BACKEND_URL`.
+API-only. Frontend = Hostinger (`FRONTEND_URL`). Admin = Vercel (`ADMIN_URL`).
 
-## Local run
+## Local
 
 ```bash
-cd backend
-cp .env.example .env
 npm install
 npm run dev
 ```
 
-API: `http://localhost:7777`  
-Health: `http://localhost:7777/api/health`
+Uses `.env` + `.env.local` (local overrides).
 
-## Connect frontend & admin (local)
+API: http://localhost:7777 · Health: `/health`
 
-In each app's `.env`:
+## Render
 
-```env
-VITE_BACKEND_URL=http://localhost:7777
-```
+- Root: `backend`
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Health: `/health`
 
-Backend `.env` must list their origins in `CORS_ORIGINS`:
+Set on Render dashboard (or Blueprint):
 
-```env
-CORS_ORIGINS=http://localhost:8889,http://localhost:8890
-FRONTEND_URL=http://localhost:8889
-ADMIN_URL=http://localhost:8890
-```
-
-## Render deploy
-
-1. Push this repo (backend only on GitHub)
-2. Render → Blueprint → `render.yaml` → set env vars
-3. Set `BACKEND_URL` to your Render URL
-4. Set `CORS_ORIGINS`, `FRONTEND_URL`, `ADMIN_URL` to your hosted frontend/admin URLs
-
-## Frontend / admin hosting (separate)
-
-Build as static sites (Vite). Set at build time:
-
-```env
-VITE_BACKEND_URL=https://your-backend.onrender.com
-```
-
-Render static site build command:
-
-```bash
-npm install && npm run build
-```
-
-Publish the `dist/` folder.
+| Key | Notes |
+|---|---|
+| `FRONTEND_URL` | `https://nexusaix.pro,https://www.nexusaix.pro` |
+| `ADMIN_URL` | Vercel URL (add after admin deploy) |
+| `BACKEND_URL` | This service’s public URL |
+| `MONGODB_URI` | Atlas connection string |
+| `OPENROUTER_API_KEY` | Required |
+| `ADMIN_PASSWORD` | Admin panel login |

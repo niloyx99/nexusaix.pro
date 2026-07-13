@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS AI — Smart Signals. Better Trades.</title>
+  <meta name="description" content="AI-powered trading chart analysis, live market fusion, and future signals for serious traders." />
+  <meta name="theme-color" content="#0d0f12" />
+  <meta name="application-name" content="NEXUS AI" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="NEXUS AI" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="canonical" href="https://nexusaix.pro/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="NEXUS AI" />
+  <meta property="og:url" content="https://nexusaix.pro/" />
+  <meta property="og:title" content="NEXUS AI — Smart Signals. Better Trades." />
+  <meta property="og:description" content="AI-powered trading chart analysis, live market fusion, and future signals for serious traders." />
+  <meta property="og:image" content="https://nexusaix.pro/app/og-cover.png" />
+  <meta property="og:image:secure_url" content="https://nexusaix.pro/app/og-cover.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="NEXUS AI — Smart Signals. Better Trades." />
+  <meta name="twitter:description" content="AI-powered chart analysis and live fusion signals for Quotex traders." />
+  <meta name="twitter:image" content="https://nexusaix.pro/app/og-cover.png" />
+  <link rel="icon" type="image/png" href="/app/user_profile.png" />
+  <link rel="apple-touch-icon" href="/app/user_profile.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Orbitron:wght@700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+      background: #0d0f12;
+      color: #fff;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    .bg-layer {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    .bg-layer::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 20% 20%, #1b1215 0%, #0d0f12 45%, #0a0d0a 100%);
+    }
+    .orb { position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.45; }
+    .orb-1 { top: -5%; right: 10%; width: 45%; height: 45%; background: #521320; }
+    .orb-2 { bottom: -8%; left: -5%; width: 50%; height: 45%; background: #0c351a; }
+    .grid-bg {
+      position: absolute; inset: 0; opacity: 0.035;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px);
+      background-size: 56px 56px;
+    }
+
+    /* ── FIXED GLASS NAV ── */
+    .nav-wrap {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(13, 15, 18, 0.55);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    nav {
+      max-width: 1280px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 28px; gap: 20px;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; flex-shrink: 0;
+    }
+    .logo img {
+      width: 38px; height: 38px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 0 20px rgba(196,30,58,0.35);
+    }
+    .logo-text {
+      font-family: "Orbitron", sans-serif;
+      font-weight: 800; font-size: 1rem; letter-spacing: 0.06em;
+    }
+    .nav-center { display: flex; align-items: center; gap: 28px; }
+    .nav-center a {
+      color: rgba(255,255,255,0.55); text-decoration: none; font-size: 0.9rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-center a:hover { color: #fff; }
+
+    .page { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 100px 28px 100px; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 12px 24px; border-radius: 12px; font-weight: 700; font-size: 0.9rem;
+      text-decoration: none; border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-red {
+      background: linear-gradient(135deg, #e11d48 0%, #9f1239 55%, #7f1d1d 100%);
+      color: #fff; box-shadow: 0 6px 28px rgba(225,29,72,0.4), inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+    .btn-red:hover { box-shadow: 0 10px 36px rgba(225,29,72,0.55); transform: translateY(-1px); }
+    .btn-green {
+      background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+      color: #fff; box-shadow: 0 6px 28px rgba(22,163,74,0.35);
+    }
+    .btn-green:hover { box-shadow: 0 10px 36px rgba(22,163,74,0.5); transform: translateY(-1px); }
+    .btn-outline {
+      background: rgba(255,255,255,0.04); color: #fff;
+      border: 1px solid rgba(255,255,255,0.14);
+    }
+    .btn-outline:hover { background: rgba(255,255,255,0.08); }
+
+    /* ── HERO ── */
+    .hero-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+      min-height: 500px; margin-bottom: 72px;
+    }
+    .panel {
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      position: relative; overflow: hidden;
+    }
+    .panel-left { display: flex; flex-direction: column; justify-content: center; padding: 44px 40px; }
+    .panel-right {
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+      background: transparent;
+      border-color: rgba(255,255,255,0.05);
+    }
+
+    .pill-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 14px; border-radius: 999px; margin-bottom: 24px; width: fit-content;
+      background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.22);
+      color: #4ade80; font-size: 0.78rem; font-weight: 600;
+    }
+    .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+
+    .hero-title {
+      font-family: "Orbitron", sans-serif;
+      font-size: clamp(1.9rem, 4.5vw, 3rem);
+      font-weight: 900; line-height: 1.12; letter-spacing: 0.02em; margin-bottom: 18px;
+    }
+    .hero-title .glow-red {
+      display: block; color: #f87171;
+      text-shadow: 0 0 20px rgba(248,113,113,0.6), 0 0 50px rgba(196,30,58,0.35);
+    }
+    .hero-title .glow-green {
+      display: block; color: #4ade80;
+      text-shadow: 0 0 20px rgba(74,222,128,0.5), 0 0 50px rgba(34,197,94,0.25);
+    }
+    .hero-desc {
+      font-size: 0.94rem; line-height: 1.7; color: rgba(255,255,255,0.5);
+      max-width: 420px; margin-bottom: 28px; font-weight: 500;
+    }
+    .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+    .social-proof { display: flex; align-items: center; gap: 12px; }
+    .avatars { display: flex; }
+    .avatars img {
+      width: 32px; height: 32px; border-radius: 50%;
+      border: 2px solid #0d0f12; margin-left: -8px; object-fit: cover;
+    }
+    .avatars img:first-child { margin-left: 0; }
+    .social-proof p { font-size: 0.82rem; color: rgba(255,255,255,0.45); line-height: 1.4; }
+    .social-proof strong { color: rgba(255,255,255,0.85); font-weight: 700; }
+
+    @keyframes heroFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-18px); }
+    }
+
+    .char-wrap {
+      position: relative; width: 100%; max-width: 380px;
+      display: flex; align-items: flex-end; justify-content: center;
+      animation: heroFloat 5s ease-in-out infinite;
+    }
+    .char-glow {
+      position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%);
+      width: 75%; height: 45%; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(196,30,58,0.4) 0%, rgba(34,197,94,0.15) 45%, transparent 70%);
+      filter: blur(28px);
+      z-index: 0;
+      animation: heroFloat 5s ease-in-out infinite reverse;
+    }
+    .char-img {
+      position: relative; z-index: 2; width: 100%; max-width: 360px; height: auto;
+      mix-blend-mode: screen;
+      filter: drop-shadow(0 16px 32px rgba(0,0,0,0.45));
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* ── PRICING ── */
+    .section-head { text-align: center; margin-bottom: 40px; }
+    .section-head h2 {
+      font-family: "Orbitron", sans-serif;
+      font-size: clamp(1.4rem, 3vw, 1.9rem); font-weight: 800; margin-bottom: 10px;
+    }
+    .section-head p { color: rgba(255,255,255,0.45); font-size: 0.94rem; max-width: 520px; margin: 0 auto; }
+
+    .pricing {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 72px;
+    }
+    .price-card {
+      padding: 32px 28px; border-radius: 8px; text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(12px);
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      position: relative;
+    }
+    .price-card:hover {
+      border-color: rgba(196,30,58,0.35);
+      transform: translateY(-4px);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+    }
+    .price-card.featured {
+      border-color: rgba(34,197,94,0.35);
+      background: linear-gradient(160deg, rgba(12,53,26,0.2), rgba(255,255,255,0.03));
+    }
+    .price-card.featured::before {
+      content: "POPULAR"; position: absolute; top: 14px; right: 14px;
+      font-size: 0.65rem; font-weight: 800; letter-spacing: 0.08em;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(34,197,94,0.15); color: #4ade80;
+      border: 1px solid rgba(34,197,94,0.3);
+    }
+    .price-icon {
+      width: 48px; height: 48px; margin: 0 auto 18px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(196,30,58,0.22), rgba(82,19,32,0.35));
+      border: 1px solid rgba(248,113,113,0.35);
+      color: #fca5a5;
+    }
+    .price-icon svg {
+      width: 24px; height: 24px;
+      color: inherit;
+    }
+    .price-icon svg.icon-stroke path {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .price-icon svg.icon-fill path {
+      fill: currentColor;
+      stroke: none;
+    }
+    .price-card.featured .price-icon {
+      background: linear-gradient(135deg, rgba(34,197,94,0.22), rgba(12,53,26,0.35));
+      border-color: rgba(74,222,128,0.35);
+      color: #86efac;
+    }
+    .price-card:last-child .price-icon {
+      background: linear-gradient(135deg, rgba(251,191,36,0.18), rgba(120,53,15,0.28));
+      border-color: rgba(251,191,36,0.35);
+      color: #fcd34d;
+    }
+    .price-amount {
+      font-family: "Orbitron", sans-serif;
+      font-size: 2.4rem; font-weight: 900; margin-bottom: 4px;
+    }
+    .price-amount span { font-size: 1rem; font-weight: 600; color: rgba(255,255,255,0.45); }
+    .price-tier { font-size: 0.85rem; font-weight: 700; color: rgba(255,255,255,0.7); margin-bottom: 16px; }
+    .price-signals {
+      font-size: 1.1rem; font-weight: 800; color: #4ade80; margin-bottom: 8px;
+    }
+    .price-desc { font-size: 0.82rem; color: rgba(255,255,255,0.4); line-height: 1.55; margin-bottom: 22px; }
+    .price-card .btn { width: 100%; padding: 12px 20px; font-size: 0.88rem; }
+
+    /* ── FEATURES ── */
+    .features {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 60px;
+    }
+    .feat {
+      padding: 28px 24px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+      background: rgba(255,255,255,0.03); backdrop-filter: blur(10px);
+      transition: border-color 0.25s;
+    }
+    .feat:hover { border-color: rgba(255,255,255,0.14); }
+    .feat-icon {
+      width: 44px; height: 44px; margin-bottom: 16px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px;
+      background: rgba(82,19,32,0.28); border: 1px solid rgba(248,113,113,0.3);
+      color: #fca5a5;
+    }
+    .feat-icon svg path {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .feat h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+    .feat p { font-size: 0.85rem; line-height: 1.6; color: rgba(255,255,255,0.45); }
+
+    .cta-band {
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+      padding: 48px; text-align: center;
+      background: rgba(82,19,32,0.12); backdrop-filter: blur(12px);
+      margin-bottom: 48px;
+    }
+    .cta-band h2 { font-family: "Orbitron", sans-serif; font-size: 1.5rem; font-weight: 800; margin-bottom: 10px; }
+    .cta-band p { color: rgba(255,255,255,0.5); margin-bottom: 24px; font-size: 0.94rem; }
+
+    footer {
+      padding-top: 28px; border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+      color: rgba(255,255,255,0.3); font-size: 0.82rem;
+    }
+    footer a { color: rgba(255,255,255,0.45); text-decoration: none; }
+    footer a:hover { color: #fff; }
+    footer .links { display: flex; gap: 20px; }
+
+    /* ── FLOATING TELEGRAM ── */
+    .telegram-fab {
+      position: fixed; bottom: 28px; right: 28px; z-index: 200;
+      width: 58px; height: 58px; border-radius: 50%;
+      background: #24A1DE;
+      display: flex; align-items: center; justify-content: center;
+      text-decoration: none; color: #fff;
+      box-shadow: 0 8px 32px rgba(36,161,222,0.45);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .telegram-fab:hover {
+      transform: scale(1.08);
+      box-shadow: 0 12px 40px rgba(36,161,222,0.65);
+    }
+    .telegram-fab::before {
+      content: ""; position: absolute; inset: -4px; border-radius: 50%;
+      border: 2px solid rgba(36,161,222,0.5);
+      animation: telegramPing 2s ease-out infinite;
+    }
+    .telegram-fab::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,0.25) 0%, transparent 70%);
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .telegram-fab:hover::after { opacity: 1; }
+    @keyframes telegramPing {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    .telegram-fab svg { position: relative; z-index: 1; }
+
+    .icon { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-lg { width: 24px; height: 24px; }
+
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; min-height: auto; }
+      .panel-left { padding: 32px 24px; order: 1; }
+      .panel-right { min-height: 340px; order: 0; }
+      .pricing { grid-template-columns: 1fr; }
+      .features { grid-template-columns: 1fr; }
+      .nav-center { display: none; }
+      .page { padding: 88px 20px 90px; }
+      nav { padding: 14px 20px; }
+      .telegram-fab { bottom: 20px; right: 20px; width: 54px; height: 54px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-layer">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="grid-bg"></div>
+  </div>
+
+  <header class="nav-wrap">
+    <nav>
+      <a href="/" class="logo">
+        <img src="/app/user_profile.png" alt="NEXUS AI" width="38" height="38" />
+        <span class="logo-text">NEXUS AI</span>
+      </a>
+      <div class="nav-center">
+        <a href="#pricing">Pricing</a>
+        <a href="#features">Features</a>
+        <a href="https://t.me/Owneraldifx" target="_blank" rel="noopener">Community</a>
+      </div>
+      <a href="/app" class="btn btn-red" style="padding:10px 20px;font-size:0.85rem">Get Started</a>
+    </nav>
+  </header>
+
+  <div class="page">
+    <section class="hero-grid">
+      <div class="panel panel-left">
+        <div class="pill-badge">
+          <span class="pill-dot"></span>
+          AI Chart Analysis &amp; Live Signals &rsaquo;
+        </div>
+        <h1 class="hero-title">
+          Dominate With
+          <span class="glow-red">NEXUS</span>
+          <span class="glow-green">AI</span>
+        </h1>
+        <p class="hero-desc">
+          Experience the next generation of binary trading. Our AI engine fuses chart vision with live market data to deliver precision signals directly to you.
+        </p>
+        <div class="hero-cta">
+          <a href="/app" class="btn btn-green">Activate Now &rarr;</a>
+          <a href="#pricing" class="btn btn-outline">View Plans</a>
+        </div>
+        <div class="social-proof">
+          <div class="avatars">
+            <img src="/app/user_profile.png" alt="" width="32" height="32" />
+            <img src="/app/user_profile.png" alt="" width="32" height="32" style="opacity:0.85" />
+            <img src="/app/user_profile.png" alt="" width="32" height="32" style="opacity:0.7" />
+          </div>
+          <p><strong>1K+ Active Users</strong><br />Trading with NEXUS AI</p>
+        </div>
+      </div>
+
+      <div class="panel panel-right">
+        <div class="char-wrap">
+          <div class="char-glow" aria-hidden="true"></div>
+          <img
+            class="char-img"
+            src="/landing-hero-character.png"
+            alt="NEXUS AI Trading Assistant"
+            width="360"
+            height="480"
+            loading="eager"
+            decoding="async"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- PRICING -->
+    <div class="section-head" id="pricing">
+      <h2>Choose Your Plan</h2>
+      <p>Deposit to activate your license. Start trading with AI-powered signals instantly.</p>
+    </div>
+
+    <div class="pricing">
+      <div class="price-card">
+        <div class="price-icon">
+          <svg class="icon-lg icon-stroke" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="price-amount">$30</div>
+        <div class="price-tier">Basic Plan</div>
+        <div class="price-signals">12 Signals / Day</div>
+        <p class="price-desc">Perfect for beginners. Chart analysis + future signals with daily refresh.</p>
+        <a href="https://t.me/Owneraldifx" target="_blank" rel="noopener" class="btn btn-outline">Get License</a>
+      </div>
+
+      <div class="price-card featured">
+        <div class="price-icon">
+          <svg class="icon-lg icon-fill" viewBox="0 0 24 24"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></svg>
+        </div>
+        <div class="price-amount">$100</div>
+        <div class="price-tier">Pro Plan</div>
+        <div class="price-signals">20 Signals / Day</div>
+        <p class="price-desc">For active traders. More signals, faster analysis, priority support.</p>
+        <a href="https://t.me/Owneraldifx" target="_blank" rel="noopener" class="btn btn-green">Get License</a>
+      </div>
+
+      <div class="price-card">
+        <div class="price-icon">
+          <svg class="icon-lg icon-fill" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        </div>
+        <div class="price-amount">$200</div>
+        <div class="price-tier">Premium Plan</div>
+        <div class="price-signals">50 Signals / Day</div>
+        <p class="price-desc">Maximum power. Full analytics, unlimited chart uploads, premium access.</p>
+        <a href="https://t.me/Owneraldifx" target="_blank" rel="noopener" class="btn btn-outline">Get License</a>
+      </div>
+    </div>
+
+    <!-- FEATURES -->
+    <div class="section-head" id="features">
+      <h2>Built for Serious Traders</h2>
+      <p>Everything you need to analyze charts faster and trade with confidence.</p>
+    </div>
+
+    <div class="features">
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        </div>
+        <h3>Chart Vision AI</h3>
+        <p>Upload any screenshot — AI reads support, resistance, trends and key levels instantly.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <h3>Live Market Fusion</h3>
+        <p>Real-time price data merged with AI analysis for accurate trade signals.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </div>
+        <h3>Future Signals</h3>
+        <p>Schedule signals ahead and let the engine verify outcomes automatically.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 4-9"/></svg>
+        </div>
+        <h3>Performance Analytics</h3>
+        <p>Track win rate, daily history and signal accuracy in one dashboard.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <h3>Secure License</h3>
+        <p>Device-bound activation keeps your account safe with tier-based access control.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        </div>
+        <h3>Multi-Platform</h3>
+        <p>Works on web, desktop and mobile. Trade from anywhere with one activation.</p>
+      </div>
+    </div>
+
+    <div class="cta-band">
+      <h2>Ready to trade smarter?</h2>
+      <p>Deposit, activate your license, and start analyzing charts with AI-powered precision.</p>
+      <a href="/app" class="btn btn-red">Launch NEXUS AI &rarr;</a>
+    </div>
+
+    <footer>
+      <span>&copy; 2026 NEXUS AI. All rights reserved.</span>
+      <div class="links">
+        <a href="/app">Launch App</a>
+        <a href="https://t.me/Owneraldifx" target="_blank" rel="noopener">Telegram Support</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Floating Telegram -->
+  <a
+    href="https://t.me/Owneraldifx"
+    target="_blank"
+    rel="noopener noreferrer"
+    class="telegram-fab"
+    aria-label="Contact us on Telegram"
+    title="Telegram Support"
+  >
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M9.78 15.28l-.38 5.36c.54 0 .78-.23 1.06-.51l2.54-2.43 5.27 3.86c.97.53 1.66.25 1.92-.89l3.46-16.22h.01c.31-1.44-.52-2.01-1.46-1.67L1.17 9.59c-1.41.55-1.39 1.34-.24 1.7l5.47 1.71L19.5 6.1c.66-.43 1.26-.19.77.24"/>
+    </svg>
+  </a>
+</body>
+</html>

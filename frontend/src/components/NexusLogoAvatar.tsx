@@ -1,4 +1,5 @@
-import userProfile from '../assets/images/user_profile.png';
+// Served from frontend/public — copied to dist root by Vite (reliable on Linux deploys).
+const userProfile = `${import.meta.env.BASE_URL}user_profile.png`;
 
 type AvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 

@@ -444,6 +444,43 @@ function detectOppositeCandleReversal(
   };
 }
 
+function detectConsecutiveExpansion(
+  candles: ParsedCandle[]
+): { bias: Direction; active: boolean; description: string } {
+  if (candles.length < 3) {
+    return { bias: "SIDEWAYS", active: false, description: "Insufficient candles for expansion scan." };
+  }
+
+  const last3 = candles.slice(-3);
+  const greenCount = last3.filter((c) => c.bullish).length;
+  const redCount = last3.filter((c) => c.bearish).length;
+  const rising =
+    last3[2].close > last3[1].close && last3[1].close > last3[0].close;
+  const falling =
+    last3[2].close < last3[1].close && last3[1].close < last3[0].close;
+  const avgBody = avg(last3.map((c) => c.bodySize));
+
+  if (greenCount >= 2 && rising && last3[2].bodySize >= avgBody * 0.65) {
+    return {
+      bias: "UP",
+      active: true,
+      description:
+        "OTC bullish expansion — consecutive green/higher closes; avoid selling into live push.",
+    };
+  }
+
+  if (redCount >= 2 && falling && last3[2].bodySize >= avgBody * 0.65) {
+    return {
+      bias: "DOWN",
+      active: true,
+      description:
+        "OTC bearish expansion — consecutive red/lower closes; avoid buying into live dump.",
+    };
+  }
+
+  return { bias: "SIDEWAYS", active: false, description: "No active OTC expansion streak." };
+}
+
 function scoreDirection(signals: {
   momentum: Bias;
   liquiditySweep: MarketIntelligence["liquiditySweep"];
@@ -452,6 +489,7 @@ function scoreDirection(signals: {
   mmxm: MarketIntelligence["mmxm"];
   fvg: ReturnType<typeof detectFairValueGap>;
   isOtc: boolean;
+  expansion: ReturnType<typeof detectConsecutiveExpansion>;
 }): { direction: Direction; confidence: number } {
   let up = 0;
   let down = 0;
@@ -483,15 +521,26 @@ function scoreDirection(signals: {
   if (signals.fvg === "BEARISH_FVG") down += 1;
 
   if (signals.isOtc) {
-    // OTC synthetic markets: boost reversal weight after liquidity sweep
-    if (signals.liquiditySweep.detected) {
-      if (signals.liquiditySweep.type === "SSL_SWEEP") up += 3;
-      if (signals.liquiditySweep.type === "BSL_SWEEP") down += 3;
+    // OTC: last-candle / expansion continuation first (matches profitable Quotex OTC apps).
+    // Reversal-only SELL into green push is the main MTG loss pattern.
+    if (signals.expansion.active) {
+      if (signals.expansion.bias === "UP") {
+        up += 8;
+        down = Math.max(0, down - 6);
+      }
+      if (signals.expansion.bias === "DOWN") {
+        down += 8;
+        up = Math.max(0, up - 6);
+      }
+    } else {
+      // Mild momentum continuation when no expansion streak
+      if (signals.momentum === "BULLISH") up += 3;
+      if (signals.momentum === "BEARISH") down += 3;
     }
-    // Core OTC rule: after opposite/manipulation candle, next candle expands that way
-    if (signals.opposite.detected) {
-      if (signals.opposite.nextBias === "UP") up += 3;
-      if (signals.opposite.nextBias === "DOWN") down += 3;
+    // Reversal only when sweep + opposite agree (stricter than before)
+    if (signals.liquiditySweep.detected && signals.opposite.detected) {
+      if (signals.liquiditySweep.type === "SSL_SWEEP" && signals.opposite.nextBias === "UP") up += 4;
+      if (signals.liquiditySweep.type === "BSL_SWEEP" && signals.opposite.nextBias === "DOWN") down += 4;
     }
   }
 
@@ -503,16 +552,17 @@ function scoreDirection(signals: {
   else if (diff <= -3) direction = "DOWN";
 
   const dominant = Math.max(up, down);
-  let confidence = Math.min(97, Math.max(55, Math.round((dominant / total) * 100)));
+  // Spread confidence realistically (avoid always 55 or 97).
+  let confidence = Math.min(84, Math.max(54, Math.round(48 + (dominant / total) * 36)));
 
   if (
     signals.opposite.detected &&
     signals.liquiditySweep.detected &&
     signals.opposite.nextBias === direction
   ) {
-    confidence = Math.min(97, confidence + 10);
+    confidence = Math.min(86, confidence + 5);
   } else if (signals.opposite.detected && signals.opposite.nextBias === direction) {
-    confidence = Math.min(95, confidence + 6);
+    confidence = Math.min(84, confidence + 3);
   } else if (signals.liquiditySweep.detected) {
     const sweepDir =
       signals.liquiditySweep.type === "SSL_SWEEP"
@@ -520,8 +570,10 @@ function scoreDirection(signals: {
         : signals.liquiditySweep.type === "BSL_SWEEP"
           ? "DOWN"
           : "SIDEWAYS";
-    if (sweepDir === direction) confidence = Math.min(94, confidence + 5);
+    if (sweepDir === direction) confidence = Math.min(83, confidence + 2);
   }
+
+  if (direction === "SIDEWAYS") confidence = Math.min(confidence, 58);
 
   return { direction, confidence };
 }
@@ -697,6 +749,7 @@ export function analyzeMarketIntelligence(
   const mmxm = detectMmxm(parsed, liquiditySweep, momentum);
   const oppositeCandleSignal = detectOppositeCandleReversal(parsed, liquiditySweep, momentum);
   const fvg = detectFairValueGap(parsed);
+  const expansion = detectConsecutiveExpansion(parsed);
 
   const { direction, confidence } = scoreDirection({
     momentum,
@@ -706,12 +759,15 @@ export function analyzeMarketIntelligence(
     mmxm,
     fvg,
     isOtc: options.isOtc,
+    expansion,
   });
 
   const otcInsight = options.isOtc
-    ? options.payoutPercent && options.payoutPercent >= 85
-      ? "OTC market active — high payout pair; prioritize liquidity sweep + opposite-wick reversals (Quotex synthetic behavior)."
-      : "OTC market — watch for fake breakouts and quick mean-reversion after manipulation wicks."
+    ? expansion.active
+      ? `${expansion.description} ${options.payoutPercent && options.payoutPercent >= 85 ? "High payout OTC pair." : ""}`
+      : options.payoutPercent && options.payoutPercent >= 85
+        ? "OTC market active — high payout pair; prioritize liquidity sweep + opposite-wick reversals (Quotex synthetic behavior)."
+        : "OTC market — watch for fake breakouts and quick mean-reversion after manipulation wicks."
     : "REAL market — structure + session liquidity drives bias.";
 
   const fusionBullets = [
@@ -722,6 +778,7 @@ export function analyzeMarketIntelligence(
     `**MSNR**: ${msnr.description}`,
     `**Price action**: ${priceAction.description}`,
     `**Opposite-candle model**: ${oppositeCandleSignal.description}`,
+    expansion.active ? `**OTC expansion**: ${expansion.description}` : "",
     `**FVG**: ${fvg === "NONE" ? "No active fair value gap" : fvg.replace("_", " ")}`,
     `**OTC**: ${otcInsight}`,
   ];

@@ -66,7 +66,7 @@ export default function AnalysisLoader({ progress }: AnalysisLoaderProps) {
   const pct = Math.min(100, Math.max(0, Math.round(progress)));
 
   return (
-    <div className="p-8 lg:p-10 rounded-[28px] bg-white/[0.03] border border-white/[0.07] shadow-xl flex flex-col items-center justify-center text-center min-h-[350px] lg:max-w-4xl lg:mx-auto lg:w-full relative overflow-hidden">
+    <div className="p-8 lg:p-10 rounded-xl bg-white/[0.03] border border-white/[0.07] shadow-xl flex flex-col items-center justify-center text-center min-h-[350px] lg:max-w-4xl lg:mx-auto lg:w-full relative overflow-hidden">
       <div className="flex items-center justify-center w-full max-w-sm gap-3 sm:gap-5">
         {/* Left candlesticks */}
         <div className="flex items-end justify-center gap-1 sm:gap-1.5 h-[56px] shrink-0 opacity-80">

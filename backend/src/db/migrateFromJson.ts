@@ -16,7 +16,7 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
     return fallback;
   }
 }
-
+ 
 interface AppMetaDoc {
   _id: string;
   done?: boolean;

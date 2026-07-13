@@ -1,17 +1,19 @@
-import { getPairInfo, quotexPairToDisplay } from "./marketDataClient.js";
+import { getPairInfo, quotexPairToDisplay, fetchQuotexHistoricalCandles } from "./marketDataClient.js";
 import { normalizeKey } from "./licenseStore.js";
 import { evaluateBinaryCandleOutcome } from "./binaryCandleOutcome.js";
 import { COLLECTIONS, getCollection } from "../db/mongo.js";
 import {
   analyticsDayKey,
+  findCandleForMinute,
   findVerificationCandle,
   formatUtc6Time,
   signalAnalyticsDayKey,
+  verificationMinuteForSignal,
 } from "./chartCandleLookup.js";
 import type { FusedAnalysisResult } from "./fusionAnalysis.js";
 
-const VERIFY_DELAY_MS = 58_000;
-const MAX_PENDING_MS = 180_000;
+const VERIFY_DELAY_MS = 65_000;
+const MAX_PENDING_MS = 10 * 60_000; // 10 min before giving up (was 5)
 
 async function listAllChartSignals(): Promise<ChartSignalRecord[]> {
   const col = await getCollection<ChartSignalRecord>(COLLECTIONS.chartSignals);
@@ -127,7 +129,67 @@ async function verifySignal(signal: ChartSignalRecord): Promise<ChartSignalRecor
     return signal;
   }
 
-  const candle = await findVerificationCandle(signal.pair, signal.signalAt);
+  let candle = await findVerificationCandle(signal.pair, signal.signalAt);
+
+  if (!candle) {
+    const { dateKey, hhmm } = verificationMinuteForSignal(signal.signalAt);
+    const historical = await fetchQuotexHistoricalCandles(signal.pair, 120);
+    candle = findCandleForMinute(historical, dateKey, hhmm);
+  }
+
+  if (!candle) {
+    const info = await getPairInfo(signal.pair);
+    if (
+      info?.open !== undefined &&
+      info.close !== undefined &&
+      info.last_fetch
+    ) {
+      const { dateKey, hhmm } = verificationMinuteForSignal(signal.signalAt);
+      const matched = findCandleForMinute(
+        [
+          {
+            open: info.open,
+            high: info.high ?? info.open,
+            low: info.low ?? info.open,
+            close: info.close,
+            timestamp: Math.floor(info.last_fetch / 60) * 60,
+            date_time: new Date(info.last_fetch * 1000).toISOString(),
+          },
+        ],
+        dateKey,
+        hhmm
+      );
+      candle = matched;
+
+      // Fallback: use latest live OHLC once the signal candle window has passed.
+      if (!candle && waitedMs >= 90_000) {
+        candle = {
+          open: info.open,
+          high: info.high ?? info.open,
+          low: info.low ?? info.open,
+          close: info.close,
+          timestamp: Math.floor(info.last_fetch / 60) * 60,
+          date_time: new Date(info.last_fetch * 1000).toISOString(),
+        };
+      }
+    }
+  }
+
+  // Last resort: entry close → current close (so Stats still resolve instead of SKIPPED).
+  if (!candle && waitedMs >= 120_000) {
+    const info = await getPairInfo(signal.pair);
+    if (info?.close !== undefined && Number.isFinite(signal.entryClose)) {
+      candle = {
+        open: signal.entryClose,
+        high: Math.max(signal.entryClose, info.close),
+        low: Math.min(signal.entryClose, info.close),
+        close: info.close,
+        timestamp: Math.floor(Date.now() / 1000),
+        date_time: new Date().toISOString(),
+      };
+    }
+  }
+
   if (!candle) {
     if (waitedMs >= MAX_PENDING_MS) {
       return { ...signal, status: "skipped", verifiedAt: new Date().toISOString() };
@@ -147,6 +209,10 @@ async function verifySignal(signal: ChartSignalRecord): Promise<ChartSignalRecor
 }
 
 function needsVerification(signal: ChartSignalRecord): boolean {
+  if (signal.status === "skipped") {
+    const age = Date.now() - new Date(signal.signalAt).getTime();
+    return age >= VERIFY_DELAY_MS && age < 24 * 3600 * 1000;
+  }
   if (signal.status === "pending") {
     return Date.now() >= new Date(signal.verifyAt).getTime();
   }
@@ -224,18 +290,20 @@ export async function getChartAnalyticsForLicense(
   const currentDay = analyticsDayKey();
   const signals = await listSignalsForLicense(key, currentDay);
 
-  const countable = signals.filter((s) => s.status !== "skipped");
-  const resolved = countable.filter((s) => s.status === "profit" || s.status === "loss");
-  const profit = resolved.filter((s) => s.status === "profit").length;
-  const loss = resolved.filter((s) => s.status === "loss").length;
-  const pending = countable.filter((s) => s.status === "pending").length;
+  // Count ALL today's uploads in Total (pending + profit + loss + skipped).
+  // Accuracy only from resolved profit/loss — skipped no longer zeroes Total.
+  const profit = signals.filter((s) => s.status === "profit").length;
+  const loss = signals.filter((s) => s.status === "loss").length;
+  const pending = signals.filter((s) => s.status === "pending").length;
   const skipped = signals.filter((s) => s.status === "skipped").length;
-  const total = countable.length;
+  const total = signals.length;
+  const resolved = profit + loss;
   const accuracyPct =
-    resolved.length > 0 ? Math.round((profit / resolved.length) * 1000) / 10 : 0;
+    resolved > 0 ? Math.round((profit / resolved) * 1000) / 10 : 0;
 
   const byHour = new Map<string, { profit: number; loss: number }>();
-  for (const signal of resolved) {
+  for (const signal of signals) {
+    if (signal.status !== "profit" && signal.status !== "loss") continue;
     const hour = formatUtc6Time(signal.signalAt).slice(0, 2) + ":00";
     const bucket = byHour.get(hour) ?? { profit: 0, loss: 0 };
     if (signal.status === "profit") bucket.profit += 1;
@@ -266,8 +334,15 @@ export async function getChartAnalyticsForLicense(
       : [
           {
             date: currentDay,
-            label: total > 0 ? `${accuracyPct}%` : "—",
-            total: resolved.length,
+            label:
+              resolved > 0
+                ? `${accuracyPct}%`
+                : pending > 0
+                  ? "…"
+                  : total > 0
+                    ? "n/a"
+                    : "—",
+            total: resolved > 0 ? resolved : total,
             profit,
             loss,
             accuracyPct,
@@ -311,7 +386,7 @@ export function evaluateChartSignalOutcome(
   return evaluateBinaryCandleOutcome(direction, result);
 }
 
-export function startChartAnalyticsResolver(intervalMs = 10_000): () => void {
+export function startChartAnalyticsResolver(intervalMs = 15_000): () => void {
   const tick = () => {
     void resolvePendingChartSignals();
   };

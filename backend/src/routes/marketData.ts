@@ -1,8 +1,8 @@
 import { Router } from "express";
 import {
   checkMarketDataHealth,
-  getMarketApiUrl,
 } from "../services/marketDataClient.js";
+import { API_PREFIX } from "../config/paths.js";
 
 const router = Router();
 
@@ -11,11 +11,14 @@ router.get("/status", async (_req, res) => {
   res.json({
     success: health.status === "ok",
     data: {
-      ...health,
+      status: health.status,
+      total_pairs: health.total_pairs,
+      active_pairs: health.active_pairs,
+      last_update: health.last_update,
       message:
         health.status === "ok"
-          ? "Market data API connected"
-          : "Market data API offline — check QUOTEX_MARKET_API_URL",
+          ? "Market data feed connected"
+          : "Market data feed offline",
     },
   });
 });
@@ -23,8 +26,7 @@ router.get("/status", async (_req, res) => {
 router.get("/", (_req, res) => {
   res.json({
     success: true,
-    apiUrl: getMarketApiUrl(),
-    endpoints: ["/api/market-data/status"],
+    endpoints: [`${API_PREFIX}/market-data/status`],
   });
 });
 

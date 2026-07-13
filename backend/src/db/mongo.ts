@@ -9,6 +9,7 @@ export const COLLECTIONS = {
   chartSignals: "chart_signals",
   candleHistory: "candle_history",
   appMeta: "app_meta",
+  newsAnalysis: "news_analysis",
 } as const;
 
 let client: MongoClient | null = null;
@@ -129,6 +130,12 @@ async function ensureIndexes(database: Db): Promise<void> {
   await database.collection(COLLECTIONS.chartSignals).createIndex({ id: 1 }, { unique: true });
   await database.collection(COLLECTIONS.chartSignals).createIndex({ licenseKey: 1, signalAt: -1 });
   await database.collection(COLLECTIONS.candleHistory).createIndex({ pair: 1 }, { unique: true });
+  await database
+    .collection(COLLECTIONS.newsAnalysis)
+    .createIndex({ calendarDate: 1, eventId: 1 });
+  await database
+    .collection(COLLECTIONS.newsAnalysis)
+    .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 }
 
 export async function disconnectMongo(): Promise<void> {

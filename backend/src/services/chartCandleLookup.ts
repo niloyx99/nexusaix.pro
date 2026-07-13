@@ -91,7 +91,7 @@ export function findCandleForMinute(
   for (const c of candles) {
     if (!c.timestamp) continue;
     const diff = Math.abs(c.timestamp * 1000 - targetTs);
-    if (diff < bestDiff && diff <= 90_000) {
+    if (diff < bestDiff && diff <= 180_000) {
       bestDiff = diff;
       best = c;
     }

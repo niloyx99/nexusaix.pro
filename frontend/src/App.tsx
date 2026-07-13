@@ -4,10 +4,12 @@ import GlowBackground from './components/GlowBackground';
 import DashboardScreenOne from './components/DashboardScreenOne';
 import DashboardScreenTwo from './components/DashboardScreenTwo';
 import SignalsScreen from './components/SignalsScreen';
+import NewsSignalsScreen from './components/NewsSignalsScreen';
 import ProfileScreen from './components/ProfileScreen';
 import BottomNavigation from './components/BottomNavigation';
 import SideNavigation from './components/SideNavigation';
 import LoginScreen from './components/LoginScreen';
+import InstallAppBanner from './components/InstallAppBanner';
 import { TabType, NexusUser } from './types';
 import {
   dispatchChartPaste,
@@ -26,6 +28,7 @@ import { getDeviceFingerprint } from './lib/deviceFingerprint';
 const DESKTOP_TITLES: Record<TabType, { title: string; subtitle: string }> = {
   home: { title: 'Hello Everyone', subtitle: 'Welcome Back!' },
   signals: { title: 'Live Signals', subtitle: 'AI-powered market signals' },
+  news: { title: 'High Impact News', subtitle: 'ForexFactory high impact + Gemini AI' },
   stats: { title: 'Performance', subtitle: 'Accuracy & trading stats' },
   profile: { title: 'My Profile', subtitle: 'Account & license details' },
 };
@@ -119,7 +122,7 @@ export default function App() {
       <div
         id="dashboard-container"
         tabIndex={-1}
-        className="w-full h-full sm:h-[820px] sm:max-h-[90vh] sm:w-[410px] sm:rounded-[40px] lg:w-full lg:max-w-none lg:h-full lg:max-h-full lg:rounded-none bg-transparent backdrop-blur-[35px] relative shadow-2xl flex flex-col lg:flex-row overflow-hidden transition-all duration-500 border-0 sm:border lg:border-0 border-white/[0.06] outline-none"
+        className="w-full h-full sm:h-[820px] sm:max-h-[90vh] sm:w-[410px] sm:rounded-xl lg:w-full lg:max-w-none lg:h-full lg:max-h-full lg:rounded-none bg-transparent backdrop-blur-[35px] relative shadow-2xl flex flex-col lg:flex-row overflow-hidden transition-all duration-500 border-0 sm:border lg:border-0 border-white/[0.06] outline-none"
       >
         <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none rounded-[inherit]">
           <div className="absolute inset-0 bg-[#0d0f12]/65" />
@@ -134,17 +137,19 @@ export default function App() {
 
         <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
           {desktopHeader && (
-            <header className="hidden lg:flex items-center justify-between px-10 xl:px-14 py-6 shrink-0 border-b border-white/[0.06]">
-              <div>
-                <h1 className="text-3xl font-extrabold tracking-tight text-white">{desktopHeader.title}</h1>
-                <p className="text-[14px] text-white/45 font-medium mt-1">{desktopHeader.subtitle}</p>
+            <header className="hidden lg:flex items-center justify-center px-6 xl:px-10 py-5 shrink-0 border-b border-white/[0.06] relative">
+              <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-extrabold tracking-tight text-white">{desktopHeader.title}</h1>
+                  <p className="text-[13px] text-white/45 font-medium mt-1">{desktopHeader.subtitle}</p>
+                </div>
+                <NexusLogoAvatar size="md" rounded="lg" />
               </div>
-              <NexusLogoAvatar size="md" rounded="lg" />
             </header>
           )}
 
           <div
-            className="flex-1 min-h-0 px-6 lg:px-10 xl:px-14 max-lg:pt-6 lg:pt-2 relative overflow-hidden flex flex-col"
+            className="flex-1 min-h-0 px-4 sm:px-6 lg:px-8 xl:px-10 max-lg:pt-6 lg:pt-2 relative overflow-hidden flex flex-col"
             style={{ paddingTop: !activatedUser ? 'var(--app-safe-top)' : undefined }}
           >
             <AnimatePresence mode="wait">
@@ -196,6 +201,19 @@ export default function App() {
                     </motion.div>
                   )}
 
+                  {activeTab === 'news' && (
+                    <motion.div
+                      key="screen-news"
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -15 }}
+                      transition={{ duration: 0.35, ease: 'easeInOut' }}
+                      className="w-full h-full min-h-0 flex flex-col"
+                    >
+                      <NewsSignalsScreen />
+                    </motion.div>
+                  )}
+
                   {activeTab === 'stats' && (
                     <motion.div
                       key="screen-2"
@@ -237,6 +255,8 @@ export default function App() {
               <BottomNavigation activeTab={activeTab} onChangeTab={setActiveTab} />
             </div>
           )}
+
+          {activatedUser && <InstallAppBanner />}
         </div>
       </div>
     </div>

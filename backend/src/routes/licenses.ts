@@ -129,6 +129,39 @@ export function getLicenseKeyFromRequest(req: Request): string {
   return "";
 }
 
+/** Validates license + daily limit without consuming scans (chart analyze charges only on success). */
+export async function requireValidatedLicense(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const key = getLicenseKeyFromRequest(req);
+    if (!key) {
+      res.status(401).json({ error: "License key required.", code: "LICENSE_REQUIRED" });
+      return;
+    }
+
+    const { validateLicenseForRequest } = await import("../services/licenseStore.js");
+    const { getDeviceFingerprintFromRequest } = await import("../utils/clientInfo.js");
+    const fingerprint = getDeviceFingerprintFromRequest(req);
+    const { license, usage } = await validateLicenseForRequest(key, fingerprint);
+    res.locals.license = license;
+    res.locals.licenseUsage = usage;
+    next();
+  } catch (error: unknown) {
+    const err = error as Error & { status?: number; usage?: unknown; code?: string };
+    const status = err.status ?? 500;
+    res.status(status).json({
+      error: err.message || "License check failed.",
+      code:
+        err.code ??
+        (status === 429 ? "DAILY_LIMIT" : status === 403 ? "LICENSE_BLOCKED" : "LICENSE_ERROR"),
+      usage: err.usage,
+    });
+  }
+}
+
 export async function requireActiveLicense(
   req: Request,
   res: Response,

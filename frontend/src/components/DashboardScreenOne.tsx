@@ -5,8 +5,9 @@ import ProgressArc from './ProgressArc';
 import AnalysisLoader from './AnalysisLoader';
 import NexusLogoAvatar from './NexusLogoAvatar';
 import { getLicenseHeaders } from '../lib/nexusUser';
-import { apiUrl } from '../lib/api';
+import { apiUrl, fetchWithRetry } from '../lib/api';
 import { CHART_PASTE_EVENT } from '../utils/clipboardImage';
+import { compressChartImage } from '../utils/compressChartImage';
 
 interface AnalysisResult {
   trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -48,6 +49,7 @@ export default function DashboardScreenOne() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [connectionToast, setConnectionToast] = useState<string | null>(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  const [marketFeedReady, setMarketFeedReady] = useState<boolean | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,6 +87,27 @@ export default function DashboardScreenOne() {
     toastTimerRef.current = setTimeout(() => setConnectionToast(null), 650);
   };
 
+  const checkMarketFeed = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await fetchWithRetry(apiUrl('/api/market-data/status'), undefined, 1);
+      const data = await response.json();
+      const ok = Boolean(data?.success);
+      setMarketFeedReady(ok);
+      return ok;
+    } catch {
+      setMarketFeedReady(false);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkMarketFeed();
+    const timer = setInterval(() => {
+      void checkMarketFeed();
+    }, 45_000);
+    return () => clearInterval(timer);
+  }, [checkMarketFeed]);
+
   const flashPasteHint = useCallback(() => {
     if (pasteHintTimerRef.current) clearTimeout(pasteHintTimerRef.current);
     setPasteHint(true);
@@ -106,7 +129,16 @@ export default function DashboardScreenOne() {
     setAnalysisProgress(8);
     setError(null);
 
+    const feedOk = await checkMarketFeed();
+    if (!feedOk) {
+      flashConnectionToast('Market data offline — analysis paused to save your scan.');
+      setError('Market data feed is offline. Analysis will not run until the live feed reconnects.');
+      setIsAnalyzing(false);
+      return;
+    }
+
     try {
+      // Never retry analyze — each attempt burns Gemini tokens.
       const response = await fetch(apiUrl('/api/analyze'), {
         method: 'POST',
         headers: {
@@ -123,10 +155,21 @@ export default function DashboardScreenOne() {
           ? data.failures
           : [data?.error || data?.message || 'Analysis Failed'];
 
+        const code = typeof data?.code === 'string' ? data.code : '';
+        const isMarketIssue =
+          code === 'MARKET_DATA_OFFLINE' ||
+          code === 'MARKET_DATA_UNAVAILABLE' ||
+          reasons.some((reason) => /market data|market pair|live candles/i.test(reason));
+
         reasons.forEach((reason, index) => {
           setTimeout(() => flashConnectionToast(reason), index * 700);
         });
-        resetForNewAnalysis();
+
+        if (isMarketIssue) {
+          setError(reasons.join(' '));
+        } else {
+          resetForNewAnalysis();
+        }
         return;
       }
 
@@ -140,7 +183,7 @@ export default function DashboardScreenOne() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [resetForNewAnalysis]);
+  }, [checkMarketFeed, resetForNewAnalysis]);
 
   const processFile = useCallback((file: File | Blob) => {
     const normalized = file instanceof File ? file : new File([file], 'pasted-chart.png', { type: 'image/png' });
@@ -156,9 +199,10 @@ export default function DashboardScreenOne() {
     setError(null);
     flashPasteHint();
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       if (event.target?.result) {
-        const base64Img = event.target.result as string;
+        const raw = event.target.result as string;
+        const base64Img = await compressChartImage(raw);
         setScreenshot(base64Img);
         setAnalysisResult(null);
         setAnalysisExpanded(false);
@@ -285,8 +329,8 @@ export default function DashboardScreenOne() {
     confidence: {
       title: 'Market Confidence',
       desc: 'Estimated Win Probability',
-      val: analysisResult ? analysisResult.winRateVal : '93% ACCURACY',
-      pct: analysisResult ? analysisResult.winRatePct : 93,
+      val: analysisResult ? analysisResult.winRateVal : '72% WIN RATE',
+      pct: analysisResult ? analysisResult.winRatePct : 72,
       trend: 'up' as const,
       color: 'green' as const,
     },
@@ -379,9 +423,9 @@ export default function DashboardScreenOne() {
               className="space-y-6 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-10 xl:gap-12 lg:items-start lg:pt-6 xl:pt-8"
             >
               {/* Header — mobile/tablet only */}
-              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-[24px] bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none lg:col-span-2 max-lg:mt-1">
+              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none lg:col-span-2 max-lg:mt-1">
                 {/* Grid dots icon container matching bottom icon background style */}
-                <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
+                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
                   <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
                     <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
                     <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
@@ -398,7 +442,7 @@ export default function DashboardScreenOne() {
                 </div>
 
                 {/* Profile Avatar with matching glass container style */}
-                <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
+                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
                   <NexusLogoAvatar size="xs" />
                 </div>
               </div>
@@ -429,11 +473,23 @@ export default function DashboardScreenOne() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="relative p-6 rounded-[28px] bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.45)] space-y-4"
+                className="relative p-6 rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.45)] space-y-4"
               >
-                <div className="flex items-center space-x-2">
-                  <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
-                  <span className="text-[14px] font-extrabold tracking-wide text-white">AI Market Chart Analyzer</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <Sparkles className="w-5 h-5 text-amber-400 animate-pulse shrink-0" />
+                    <span className="text-[14px] font-extrabold tracking-wide text-white truncate">AI Market Chart Analyzer</span>
+                  </div>
+                  {marketFeedReady === false && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/25">
+                      Feed offline
+                    </span>
+                  )}
+                  {marketFeedReady === true && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                      Feed live
+                    </span>
+                  )}
                 </div>
 
                 <div
@@ -441,7 +497,7 @@ export default function DashboardScreenOne() {
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
-                  className={`relative h-36 lg:h-64 xl:h-72 border border-dashed rounded-2xl flex flex-col items-center justify-center space-y-3 cursor-pointer transition-all duration-300 ${
+                  className={`relative h-36 lg:h-64 xl:h-72 border border-dashed rounded-lg flex flex-col items-center justify-center space-y-3 cursor-pointer transition-all duration-300 ${
                     isDragOver 
                       ? 'border-amber-400/80 bg-amber-400/[0.03] shadow-[0_0_20px_rgba(234,179,8,0.2)]' 
                       : 'border-white/10 bg-white/[0.01] hover:border-white/20 hover:bg-white/[0.02]'
@@ -483,7 +539,7 @@ export default function DashboardScreenOne() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="p-5 lg:p-8 rounded-[24px] lg:rounded-[28px] bg-white/[0.01] border border-white/[0.05] flex items-start space-x-3 lg:space-x-4"
+                className="p-5 lg:p-8 rounded-xl lg:rounded-xl bg-white/[0.01] border border-white/[0.05] flex items-start space-x-3 lg:space-x-4"
               >
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08] text-amber-400 shrink-0">
                   <Compass className="w-5 h-5 stroke-[1.5]" />
@@ -500,7 +556,7 @@ export default function DashboardScreenOne() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.25 }}
-                className="hidden lg:block p-6 xl:p-8 rounded-[28px] bg-white/[0.02] border border-white/[0.06] space-y-4"
+                className="hidden lg:block p-6 xl:p-8 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4"
               >
                 <span className="text-[13px] font-bold text-white/80 block">Quick Tips</span>
                 <ul className="space-y-3 text-[12px] text-white/45 leading-relaxed">
@@ -522,12 +578,12 @@ export default function DashboardScreenOne() {
               className="space-y-6 lg:max-w-4xl lg:mx-auto lg:w-full"
             >
               {/* Header — mobile/tablet only */}
-              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-[24px] bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
+              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
                 {/* Grid dots / Back icon container - acts as clear/back when clicked */}
                 <button
                   onClick={handleClear}
                   disabled={isAnalyzing}
-                  className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 disabled:opacity-50 disabled:scale-100 disabled:hover:bg-white/[0.04]"
+                  className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 disabled:opacity-50 disabled:scale-100 disabled:hover:bg-white/[0.04]"
                 >
                   <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
                     <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
@@ -545,7 +601,7 @@ export default function DashboardScreenOne() {
                 </div>
 
                 {/* Profile Avatar with matching glass container style */}
-                <div className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
+                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
                   <NexusLogoAvatar size="xs" />
                 </div>
               </div>
@@ -556,7 +612,7 @@ export default function DashboardScreenOne() {
               {analysisResult && !isAnalyzing && (
                 <div className="space-y-6">
                   {/* Premium Asset Signal Banner with integrated Recommendation */}
-                  <div className="relative p-5 lg:p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_12px_24px_-4px_rgba(0,0,0,0.4)] overflow-hidden">
+                  <div className="relative p-5 lg:p-8 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_12px_24px_-4px_rgba(0,0,0,0.4)] overflow-hidden">
                     {/* Ambient subtle top border highlight */}
                     <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/15 to-transparent" />
                     
@@ -592,7 +648,7 @@ export default function DashboardScreenOne() {
                     {/* KPI 1: Market Confidence */}
                     <motion.div
                       whileHover={{ y: -3 }}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
+                      className="flex items-center justify-between p-4 rounded-lg bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
                     >
                       <div className="space-y-0.5">
                         <span className="text-[13px] font-bold text-white/90 block">
@@ -611,7 +667,7 @@ export default function DashboardScreenOne() {
                     {/* KPI 2: Key Support Level */}
                     <motion.div
                       whileHover={{ y: -3 }}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
+                      className="flex items-center justify-between p-4 rounded-lg bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
                     >
                       <div className="space-y-0.5">
                         <span className="text-[13px] font-bold text-white/90 block">
@@ -630,7 +686,7 @@ export default function DashboardScreenOne() {
                     {/* KPI 3: Key Resistance Level */}
                     <motion.div
                       whileHover={{ y: -3 }}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
+                      className="flex items-center justify-between p-4 rounded-lg bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
                     >
                       <div className="space-y-0.5">
                         <span className="text-[13px] font-bold text-white/90 block">
@@ -649,7 +705,7 @@ export default function DashboardScreenOne() {
                     {/* KPI 4: Signal Quality */}
                     <motion.div
                       whileHover={{ y: -3 }}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
+                      className="flex items-center justify-between p-4 rounded-lg bg-white/[0.03] border border-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] transition-all duration-300"
                     >
                       <div className="space-y-0.5">
                         <span className="text-[13px] font-bold text-white/90 block">
@@ -677,7 +733,7 @@ export default function DashboardScreenOne() {
                   <button
                     type="button"
                     onClick={() => setAnalysisExpanded((prev) => !prev)}
-                    className="w-full text-left p-5 rounded-3xl bg-white/[0.02] border border-white/[0.05] space-y-3 shadow-inner hover:border-white/[0.1] transition-colors duration-200"
+                    className="w-full text-left p-5 rounded-xl bg-white/[0.02] border border-white/[0.05] space-y-3 shadow-inner hover:border-white/[0.1] transition-colors duration-200"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-1.5">

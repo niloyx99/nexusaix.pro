@@ -1,4 +1,4 @@
-export type TabType = 'home' | 'signals' | 'stats' | 'profile';
+export type TabType = 'home' | 'signals' | 'news' | 'stats' | 'profile';
 
 export type LicenseTier = 'basic' | 'pro' | 'premium' | 'regular';
 

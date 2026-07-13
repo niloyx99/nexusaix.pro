@@ -33,8 +33,7 @@ export default class ErrorBoundary extends React.Component<
           <div style={{ maxWidth: 420, textAlign: 'center' }}>
             <h1 style={{ fontSize: 18, marginBottom: 8 }}>NEXUS AI failed to load</h1>
             <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 16 }}>
-              Refresh the page. If this keeps happening, open{' '}
-              <strong>http://YOUR-PC-IP:7777</strong> instead of port 8889.
+              Refresh the page (Ctrl+Shift+R). If you still see 403 Forbidden, wait a few seconds and try again — the app will recover automatically.
             </p>
             <p style={{ fontSize: 11, opacity: 0.45, wordBreak: 'break-word' }}>
               {this.state.message}

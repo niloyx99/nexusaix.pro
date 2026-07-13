@@ -73,33 +73,64 @@ function resolveQuotexPair(token: string, preferOtc = false): string | null {
   return null;
 }
 
+function stripSignalLineNoise(line: string): string {
+  return line
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, "")
+    .replace(/[✅❌❓⏳⌛•·|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDirection(raw: string): SignalDirection | null {
+  const upper = raw.trim().toUpperCase();
+  if (upper === "CALL" || upper === "BUY") return "CALL";
+  if (upper === "PUT" || upper === "SELL") return "PUT";
+  return null;
+}
+
+/** Extract M1;PAIR;HH:MM;CALL|PUT from a line (tolerates emojis, markers, extra text). */
+function parseSignalFromLine(line: string): Omit<ParsedFutureSignal, "dateKey"> | null {
+  const cleaned = stripSignalLineNoise(line);
+  if (!cleaned) return null;
+
+  const match = cleaned.match(
+    /M1\s*;\s*([A-Za-z0-9/_]+(?:\s*\(OTC\))?)\s*;\s*(\d{1,2}:\d{2})\s*;\s*(CALL|PUT|BUY|SELL)\b/i
+  );
+  if (!match) return null;
+
+  const pairToken = match[1].replace(/\s*\(OTC\)/gi, "").trim();
+  const time = match[2].padStart(5, "0");
+  const direction = normalizeDirection(match[3]);
+  if (!direction) return null;
+
+  const preferOtc = /\(OTC\)/i.test(match[1]) || line.toUpperCase().includes("OTC");
+  const quotexPair = resolveQuotexPair(pairToken, preferOtc);
+  if (!quotexPair) return null;
+
+  return {
+    pair: normalizePairToken(pairToken),
+    quotexPair,
+    displayPair: quotexPairToDisplay(quotexPair),
+    time,
+    direction,
+  };
+}
+
 export function parseFutureSignalText(text: string): ParsedFutureSignal[] {
   const dateKey = parseDateFromText(text);
   const lines = text.split(/\r?\n/);
   const parsed: ParsedFutureSignal[] = [];
+  const seen = new Set<string>();
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    const match = trimmed.match(
-      /^M1;([A-Za-z0-9/_]+);(\d{1,2}:\d{2});(CALL|PUT)$/i
-    );
-    if (!match) continue;
+    const row = parseSignalFromLine(line);
+    if (!row) continue;
 
-    const pairToken = match[1];
-    const time = match[2].padStart(5, "0");
-    const direction = match[3].toUpperCase() as SignalDirection;
-    const preferOtc = pairToken.toUpperCase().includes("OTC");
-    const quotexPair = resolveQuotexPair(pairToken, preferOtc);
-    if (!quotexPair) continue;
+    const dedupeKey = `${row.quotexPair}|${row.time}|${row.direction}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
-    parsed.push({
-      pair: pairToken.toUpperCase(),
-      quotexPair,
-      displayPair: quotexPairToDisplay(quotexPair),
-      time,
-      direction,
-      dateKey,
-    });
+    parsed.push({ ...row, dateKey });
   }
 
   return parsed;
@@ -429,7 +460,7 @@ export async function checkFutureSignalsText(text: string): Promise<SignalCheckS
       accuracyPct: 0,
       dateKey: parseDateFromText(text),
       results: [],
-      formatted: "No valid M1 signals found. Use format: M1;EURUSD;12:10;CALL",
+      formatted: "No valid M1 signals found. Use format: M1;EURUSD;12:10;CALL (emojis/markers OK)",
     };
   }
 
