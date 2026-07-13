@@ -1,4 +1,5 @@
 import type { MarketCandle } from "./marketDataClient.js";
+import { analyzeWickAndVolume } from "./tradeSetupRules.js";
 
 export type Direction = "UP" | "DOWN" | "SIDEWAYS";
 export type Bias = "BULLISH" | "BEARISH" | "NEUTRAL";
@@ -490,6 +491,10 @@ function scoreDirection(signals: {
   fvg: ReturnType<typeof detectFairValueGap>;
   isOtc: boolean;
   expansion: ReturnType<typeof detectConsecutiveExpansion>;
+  wickDir?: Direction;
+  wickStrength?: number;
+  volumeDir?: Direction;
+  volumeStrength?: number;
 }): { direction: Direction; confidence: number } {
   let up = 0;
   let down = 0;
@@ -520,9 +525,15 @@ function scoreDirection(signals: {
   if (signals.fvg === "BULLISH_FVG") up += 1;
   if (signals.fvg === "BEARISH_FVG") down += 1;
 
+  // Wick shadow + volume scoring (REAL & OTC)
+  const ws = signals.wickStrength ?? 0;
+  const vs = signals.volumeStrength ?? 0;
+  if (signals.wickDir === "UP") up += ws;
+  if (signals.wickDir === "DOWN") down += ws;
+  if (signals.volumeDir === "UP") up += vs;
+  if (signals.volumeDir === "DOWN") down += vs;
+
   if (signals.isOtc) {
-    // OTC: last-candle / expansion continuation first (matches profitable Quotex OTC apps).
-    // Reversal-only SELL into green push is the main MTG loss pattern.
     if (signals.expansion.active) {
       if (signals.expansion.bias === "UP") {
         up += 8;
@@ -533,22 +544,18 @@ function scoreDirection(signals: {
         up = Math.max(0, up - 6);
       }
     } else {
-      // Mild momentum continuation when no expansion streak
       if (signals.momentum === "BULLISH") up += 3;
       if (signals.momentum === "BEARISH") down += 3;
     }
-    // Reversal only when sweep + opposite agree (stricter than before)
     if (signals.liquiditySweep.detected && signals.opposite.detected) {
       if (signals.liquiditySweep.type === "SSL_SWEEP" && signals.opposite.nextBias === "UP") up += 4;
       if (signals.liquiditySweep.type === "BSL_SWEEP" && signals.opposite.nextBias === "DOWN") down += 4;
     }
-    // Prefer MSNR rejection paths (BUY support / SELL resistance)
     if (signals.priceAction.rejection) {
       if (signals.priceAction.pattern === "HAMMER") up += 3;
       if (signals.priceAction.pattern === "SHOOTING_STAR") down += 3;
     }
   } else {
-    // REAL: respect momentum; avoid fighting clear trend structure early
     if (signals.momentum === "BULLISH") {
       up += 3;
       down = Math.max(0, down - 2);
@@ -562,22 +569,24 @@ function scoreDirection(signals: {
   const total = up + down || 1;
   const diff = up - down;
 
+  // Lower threshold → fewer SIDEWAYS/HOLD from engine
   let direction: Direction = "SIDEWAYS";
-  if (diff >= 3) direction = "UP";
-  else if (diff <= -3) direction = "DOWN";
+  if (diff >= 2) direction = "UP";
+  else if (diff <= -2) direction = "DOWN";
+  else if (up > down && (ws >= 2 || vs >= 2)) direction = "UP";
+  else if (down > up && (ws >= 2 || vs >= 2)) direction = "DOWN";
 
   const dominant = Math.max(up, down);
-  // Spread confidence realistically (avoid always 55 or 97).
-  let confidence = Math.min(84, Math.max(54, Math.round(48 + (dominant / total) * 36)));
+  let confidence = Math.min(86, Math.max(56, Math.round(50 + (dominant / total) * 36)));
 
   if (
     signals.opposite.detected &&
     signals.liquiditySweep.detected &&
     signals.opposite.nextBias === direction
   ) {
-    confidence = Math.min(86, confidence + 5);
+    confidence = Math.min(88, confidence + 5);
   } else if (signals.opposite.detected && signals.opposite.nextBias === direction) {
-    confidence = Math.min(84, confidence + 3);
+    confidence = Math.min(86, confidence + 3);
   } else if (signals.liquiditySweep.detected) {
     const sweepDir =
       signals.liquiditySweep.type === "SSL_SWEEP"
@@ -585,8 +594,11 @@ function scoreDirection(signals: {
         : signals.liquiditySweep.type === "BSL_SWEEP"
           ? "DOWN"
           : "SIDEWAYS";
-    if (sweepDir === direction) confidence = Math.min(83, confidence + 2);
+    if (sweepDir === direction) confidence = Math.min(85, confidence + 2);
   }
+
+  if (ws >= 3 && signals.wickDir === direction) confidence = Math.min(88, confidence + 3);
+  if (vs >= 2 && signals.volumeDir === direction) confidence = Math.min(88, confidence + 2);
 
   if (direction === "SIDEWAYS") confidence = Math.min(confidence, 58);
 
@@ -765,6 +777,7 @@ export function analyzeMarketIntelligence(
   const oppositeCandleSignal = detectOppositeCandleReversal(parsed, liquiditySweep, momentum);
   const fvg = detectFairValueGap(parsed);
   const expansion = detectConsecutiveExpansion(parsed);
+  const wickVol = analyzeWickAndVolume(candles);
 
   const { direction, confidence } = scoreDirection({
     momentum,
@@ -775,6 +788,10 @@ export function analyzeMarketIntelligence(
     fvg,
     isOtc: options.isOtc,
     expansion,
+    wickDir: wickVol.wickDir,
+    wickStrength: wickVol.wickStrength,
+    volumeDir: wickVol.volumeDir,
+    volumeStrength: wickVol.volumeStrength,
   });
 
   const otcInsight = options.isOtc

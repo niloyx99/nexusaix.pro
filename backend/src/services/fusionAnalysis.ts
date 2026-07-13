@@ -159,26 +159,34 @@ function fuseRecommendation(
 
   let direction: Direction = fusedDirection;
 
-  // Do not invent BUY/SELL from weak chart trend alone — that caused extra losses.
+  // Prefer live intel to invent fewer HOLDs when fusion was sideways.
   if (direction === "SIDEWAYS" && intel?.nextCandleDirection && intel.nextCandleDirection !== "SIDEWAYS") {
-    if (intel.confidencePct >= (isOtc ? 66 : 60)) {
+    if (intel.confidencePct >= (isOtc ? 55 : 52)) {
       direction = intel.nextCandleDirection;
     }
   }
 
+  if (direction === "SIDEWAYS") {
+    const fromGemini = geminiTradeDirection(gemini);
+    if (fromGemini !== "SIDEWAYS" && fusionConfidence >= 54) {
+      direction = fromGemini;
+    }
+  }
 
-
-  const minConfidence = isOtc ? 66 : 60;
+  const minConfidence = isOtc ? 56 : 52;
 
   const bullish = direction === "UP";
   const bearish = direction === "DOWN";
 
   const strong =
-    fusionConfidence >= 80 &&
+    fusionConfidence >= 78 &&
     direction !== "SIDEWAYS" &&
-    Boolean(intel?.liquiditySweep.detected && intel?.oppositeCandleSignal.detected);
+    Boolean(
+      intel?.liquiditySweep.detected ||
+        intel?.oppositeCandleSignal.detected ||
+        intel?.priceAction.rejection
+    );
 
-  // Simple gate: unclear / weak / conflict → HOLD (fewer losses than forced trades)
   if (direction === "SIDEWAYS" || fusionConfidence < minConfidence) {
     return "HOLD";
   }
@@ -268,25 +276,26 @@ function applyOtcSafetyGate(
   // Live feed wins over chart-only SELL when momentum is already UP (common MTG loss case).
   if (nextDirection === "DOWN" && (intel.momentum === "BULLISH" || live === "UP")) {
 
-    if (live === "UP" && intel.confidencePct >= 58) {
+    if (live === "UP" && intel.confidencePct >= 52) {
 
-      return { direction: "UP", confidence: Math.max(62, Math.min(88, intel.confidencePct)) };
+      return { direction: "UP", confidence: Math.max(60, Math.min(88, intel.confidencePct)) };
 
     }
 
-    return { direction: "SIDEWAYS", confidence: Math.min(nextConfidence, 46) };
+    // Prefer follow live over HOLD
+    if (live === "UP") return { direction: "UP", confidence: Math.max(58, Math.min(nextConfidence, 70)) };
 
   }
 
   if (nextDirection === "UP" && (intel.momentum === "BEARISH" || live === "DOWN")) {
 
-    if (live === "DOWN" && intel.confidencePct >= 58) {
+    if (live === "DOWN" && intel.confidencePct >= 52) {
 
-      return { direction: "DOWN", confidence: Math.max(62, Math.min(88, intel.confidencePct)) };
+      return { direction: "DOWN", confidence: Math.max(60, Math.min(88, intel.confidencePct)) };
 
     }
 
-    return { direction: "SIDEWAYS", confidence: Math.min(nextConfidence, 46) };
+    if (live === "DOWN") return { direction: "DOWN", confidence: Math.max(58, Math.min(nextConfidence, 70)) };
 
   }
 
@@ -298,7 +307,7 @@ function applyOtcSafetyGate(
 
     live !== nextDirection &&
 
-    intel.confidencePct >= 62
+    intel.confidencePct >= 58
 
   ) {
 
@@ -697,8 +706,8 @@ export async function analyzeWithFusion(
 
     const isOtcPreview =
       gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
-    // REAL needs deeper history for EMA200; OTC can work with shorter window.
-    const candleData = await getRecentCandles(quotexPair, isOtcPreview ? 80 : 220);
+    // Faster window: EMA50 works with ~60–80; skip waiting on 220 remote candles.
+    const candleData = await getRecentCandles(quotexPair, isOtcPreview ? 50 : 80);
 
 
 
