@@ -1,27 +1,10 @@
-# Nexus AI Frontend
+# Nexus AI — Frontend
 
-React + Vite app. API backend is hosted separately on Render.
-
-## Environment
-
-`.env`:
-```env
-VITE_BACKEND_URL=https://nexus-ai-ll9o.onrender.com
-```
-
-## Local dev
+Build for Hostinger. Set `VITE_BACKEND_URL` to your Render API URL before `npm run build`.
 
 ```bash
 npm install
-npm run dev
+npm run build
 ```
 
-## Vercel deploy
-
-1. Import this GitHub repo on [vercel.com](https://vercel.com)
-2. Framework: **Vite**
-3. Build command: `npm run build`
-4. Output directory: `dist`
-5. Add env var `VITE_BACKEND_URL` (or use committed `.env`)
-
-After deploy, add your Vercel URL to backend `CORS_ORIGINS` on Render.
+Output: `dist/` (base `/app/`)

@@ -1,6 +1,5 @@
 # Render Blueprint — Backend API only
-# Frontend: Hostinger (nexusaix.pro) | Admin: Vercel
-# Repo rootDir = backend
+# Frontend: Hostinger | Admin: Vercel
 
 services:
   - type: web
@@ -24,17 +23,11 @@ services:
       - key: QUOTEX_MARKET_API_URL
         value: https://quotex-data-1n2b.onrender.com
       - key: FRONTEND_URL
-        value: https://nexusaix.pro,https://www.nexusaix.pro
+        sync: false
       - key: ADMIN_URL
-        value: https://nexusaix-pro.vercel.app
+        sync: false
       - key: BACKEND_URL
-        value: https://nexusaix-pro-backend.onrender.com
-      - key: CORS_ORIGINS
-        value: https://nexusaix.pro,https://www.nexusaix.pro,https://nexusaix-pro.vercel.app
-      - key: API_PREFIX
-        value: /nx-svc-k8m4t7q2w9p3
-      - key: ADMIN_PATH
-        value: /nx-ctrl-p3m9k7x2w8q5
+        sync: false
       - key: MONGODB_URI
         sync: false
       - key: OPENROUTER_API_KEY

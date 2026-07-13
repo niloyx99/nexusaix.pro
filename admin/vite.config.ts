@@ -5,11 +5,9 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiPrefix = env.VITE_API_PREFIX || "/nx-svc-k8m4t7q2w9p3";
   const backendUrl = (env.VITE_BACKEND_URL || "http://localhost:7777").replace(/\/$/, "");
 
   return {
-    // Root base — admin is its own Vercel site (not under /nx-ctrl on the API host)
     base: "/",
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -22,7 +20,7 @@ export default defineConfig(({ mode }) => {
       port: 8890,
       strictPort: true,
       proxy: {
-        [apiPrefix]: {
+        "/api": {
           target: backendUrl,
           changeOrigin: true,
         },

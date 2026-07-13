@@ -6,7 +6,6 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiPrefix = env.VITE_API_PREFIX || "/nx-svc-k8m4t7q2w9p3";
   const backendUrl = (env.VITE_BACKEND_URL || "http://localhost:7777").replace(/\/$/, "");
 
   return {
@@ -55,7 +54,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff2}"],
           navigateFallback: "/app/index.html",
-          navigateFallbackDenylist: [/^\/nx-svc/, /^\/nx-ctrl/, /^\/api/],
+          navigateFallbackDenylist: [/^\/api/],
         },
         devOptions: {
           enabled: false,
@@ -72,7 +71,7 @@ export default defineConfig(({ mode }) => {
       port: 8889,
       strictPort: true,
       proxy: {
-        [apiPrefix]: {
+        "/api": {
           target: backendUrl,
           changeOrigin: true,
         },
