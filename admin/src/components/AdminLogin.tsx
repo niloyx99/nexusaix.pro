@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { Lock, Loader2, Shield, AlertCircle } from "lucide-react";
-import { adminLogin } from "../lib/storage";
+import { adminLogin, adminLogout } from "../lib/storage";
 import { verifyAdminPassword } from "../lib/api";
 import { getBackendUrl } from "../lib/backend";
 
@@ -18,23 +18,31 @@ export default function AdminLogin({ onSuccess }: AdminLoginProps) {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    adminLogout();
 
     const trimmed = password.trim();
+    if (!trimmed) {
+      setError("Enter admin password.");
+      setLoading(false);
+      return;
+    }
+
     try {
       const ok = await verifyAdminPassword(trimmed);
       if (!ok) {
-        setError("Invalid admin password or backend rejected login.");
+        setError("Wrong admin password.");
         setPassword("");
         return;
       }
       adminLogin(trimmed);
       onSuccess();
-    } catch {
-      const backend = getBackendUrl();
+    } catch (err) {
+      adminLogout();
+      const message = err instanceof Error ? err.message : "Login failed.";
       setError(
-        backend
-          ? `Cannot reach backend at ${backend}. Check Render is live and CORS allows this admin URL.`
-          : "VITE_BACKEND_URL is missing — set it in Vercel env and redeploy."
+        message.includes("fetch") || message.includes("Network")
+          ? `Cannot reach backend at ${getBackendUrl()}.`
+          : message
       );
     } finally {
       setLoading(false);
@@ -54,6 +62,7 @@ export default function AdminLogin({ onSuccess }: AdminLoginProps) {
           </div>
           <h1 className="text-xl font-black tracking-[0.2em] text-white">NEXUS AI</h1>
           <p className="text-[12px] text-white/45 font-medium">Admin Panel — Secure Login</p>
+          <p className="text-[10px] text-white/25 font-mono break-all">{getBackendUrl()}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

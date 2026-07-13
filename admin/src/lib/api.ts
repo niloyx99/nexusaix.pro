@@ -1,6 +1,15 @@
 import type { License } from "../types";
 import { clearLegacyLicenses, getAdminPassword, loadLegacyLicenses } from "./storage";
-import { apiUrl } from "./backend";
+import { apiUrl, getBackendUrl } from "./backend";
+
+function assertJsonResponse(res: Response): void {
+  const type = res.headers.get("content-type") || "";
+  if (!type.includes("application/json")) {
+    throw new Error(
+      `Backend returned non-JSON (${res.status}). Check VITE_BACKEND_URL=${getBackendUrl()}`
+    );
+  }
+}
 
 async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const password = getAdminPassword();
@@ -13,7 +22,8 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers,
   });
 
-  const data = await res.json().catch(() => ({}));
+  assertJsonResponse(res);
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
     throw new Error(data.error || `Request failed (${res.status})`);
   }
@@ -22,6 +32,9 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export async function fetchLicenses(): Promise<License[]> {
   const data = await adminFetch<{ licenses: License[] }>("/");
+  if (!Array.isArray(data.licenses)) {
+    throw new Error("Invalid license list from backend.");
+  }
   return data.licenses;
 }
 
@@ -110,11 +123,32 @@ export async function resetLicenseDeviceApi(id: string): Promise<License> {
   return data.license;
 }
 
+/** Returns true only when backend accepts this password with a real JSON API response. */
 export async function verifyAdminPassword(password: string): Promise<boolean> {
+  const trimmed = password.trim();
+  if (!trimmed) return false;
+
   const res = await fetch(apiUrl("/api/admin/licenses/"), {
     headers: {
-      "X-Admin-Password": password,
+      "X-Admin-Password": trimmed,
+      Accept: "application/json",
     },
   });
-  return res.ok;
+
+  const type = res.headers.get("content-type") || "";
+  if (!type.includes("application/json")) {
+    throw new Error(`Not connected to API at ${getBackendUrl()}`);
+  }
+
+  if (res.status === 401) return false;
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || `Backend error (${res.status})`);
+  }
+
+  const data = (await res.json().catch(() => null)) as { licenses?: unknown } | null;
+  if (!data || !Array.isArray(data.licenses)) {
+    throw new Error("Invalid admin API response.");
+  }
+  return true;
 }

@@ -9,10 +9,13 @@
 html, body, #root {
   height: 100%;
   overflow: hidden;
+  background: #0d0f12;
+  color: #fff;
 }
 
 body {
   overscroll-behavior: none;
+  margin: 0;
 }
 
 @keyframes pulseGlow {
