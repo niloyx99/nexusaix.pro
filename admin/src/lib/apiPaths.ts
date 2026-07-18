@@ -1,4 +1,8 @@
-/** Keep /api paths as-is (backend is API-only under /api). */
+/** Map legacy /api/* calls to public API prefix /api.ai/* */
 export function resolveApiPath(path: string): string {
-  return path.startsWith("/") ? path : `/${path}`;
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (normalized === "/api" || normalized.startsWith("/api/")) {
+    return `/api.ai${normalized.slice(4)}`;
+  }
+  return normalized;
 }
