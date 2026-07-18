@@ -1,5 +1,5 @@
-import { Router } from "express";
-import type { LicenseTier } from "../types/license.js";
+﻿import { Router } from "express";
+import type { LicenseTier } from "../license/license.js";
 import {
   createLicense,
   deleteLicense,
@@ -9,7 +9,7 @@ import {
   getDeviceBindings,
   resetLicenseDevice,
   updateLicense,
-} from "../services/licenseStore.js";
+} from "../license/licenseStore.js";
 
 const router = Router();
 const VALID_TIERS: LicenseTier[] = ["basic", "pro", "premium", "regular"];
@@ -20,7 +20,7 @@ function getAdminPassword(): string {
 function requireAdmin(req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) {
   const provided = String(req.headers["x-admin-password"] ?? "");
   if (!provided || provided !== getAdminPassword()) {
-    return res.status(401).json({ error: "Invalid admin password." });
+    return res.status(401).json({ success: false, error: "Invalid admin password." });
   }
   return next();
 }

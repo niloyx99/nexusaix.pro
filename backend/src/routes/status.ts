@@ -1,13 +1,13 @@
-import { Router } from "express";
-import { checkMarketDataHealth } from "../services/marketDataClient.js";
+﻿import { Router } from "express";
+import { checkMarketDataHealth } from "../market/marketDataClient.js";
 import { isMongoConnected } from "../db/mongo.js";
-import { HEALTH_PATH } from "../config/paths.js";
+import { HEALTH_PATH, LEGACY_API_PREFIX, API_PREFIX_DOT } from "../config/paths.js";
 
 const VERSION = "1.0.0";
 
 const router = Router();
 
-router.get(HEALTH_PATH, async (_req, res) => {
+async function healthHandler(_req: import("express").Request, res: import("express").Response) {
   const market = await checkMarketDataHealth();
   res.status(200).json({
     success: true,
@@ -23,6 +23,9 @@ router.get(HEALTH_PATH, async (_req, res) => {
       marketData: market.status === "ok" ? "connected" : "offline",
     },
   });
-});
+}
 
+router.get(HEALTH_PATH, healthHandler);
+router.get(`${API_PREFIX_DOT}/health`, healthHandler);
+router.get(`${LEGACY_API_PREFIX}/health`, healthHandler);
 export default router;

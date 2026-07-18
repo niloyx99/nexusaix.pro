@@ -1,33 +1,21 @@
-# Hostinger / LiteSpeed — prevent intermittent 403 on /app/
-# When Node is restarting or overloaded, Apache falls back to the filesystem.
-# Without an index under /app/, directory access returns "403 Forbidden".
-
+# Hostinger / LiteSpeed fallback when Node is briefly unavailable.
 Options -Indexes +FollowSymLinks
 DirectoryIndex index.html
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
-  # Leave Node API / admin control paths alone
   RewriteRule ^nx-svc - [L]
   RewriteRule ^nx-ctrl - [L]
 
-  # Exact /app or /app/ → static SPA index (fallback when Node is down)
-  RewriteCond %{REQUEST_URI} ^/app/?$ [NC]
-  RewriteCond %{DOCUMENT_ROOT}/app/index.html -f
-  RewriteRule ^app/?$ /app/index.html [L]
+  # Do not rewrite API paths
+  RewriteRule ^api-ai(/.*)?$ - [L]
+  RewriteRule ^api\.ai(/.*)?$ - [L]
+  RewriteRule ^api(/.*)?$ - [L]
+  RewriteRule ^health$ - [L]
 
-  # /app/* SPA routes → index.html when the file does not exist on disk
-  RewriteCond %{REQUEST_URI} ^/app/ [NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteCond %{DOCUMENT_ROOT}/app/index.html -f
-  RewriteRule ^app/.*$ /app/index.html [L]
-</IfModule>
-
-# Never show a bare directory listing / 403 for /app
-<IfModule mod_authz_core.c>
-  <DirectoryMatch "^.*/app$">
-    Require all granted
-  </DirectoryMatch>
+  RewriteCond %{DOCUMENT_ROOT}/index.html -f
+  RewriteRule ^ index.html [L]
 </IfModule>

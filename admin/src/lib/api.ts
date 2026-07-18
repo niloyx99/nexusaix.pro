@@ -1,6 +1,6 @@
 import type { License } from "../types";
 import { clearLegacyLicenses, getAdminPassword, loadLegacyLicenses } from "./storage";
-import { apiUrl, getBackendUrl } from "./backend";
+import { apiUrl, getApiRootUrl, getBackendUrl } from "./backend";
 
 function assertJsonResponse(res: Response): void {
   const type = res.headers.get("content-type") || "";
@@ -129,6 +129,7 @@ export async function verifyAdminPassword(password: string): Promise<boolean> {
   if (!trimmed) return false;
 
   const res = await fetch(apiUrl("/api/admin/licenses/"), {
+    mode: "cors",
     headers: {
       "X-Admin-Password": trimmed,
       Accept: "application/json",
@@ -137,7 +138,7 @@ export async function verifyAdminPassword(password: string): Promise<boolean> {
 
   const type = res.headers.get("content-type") || "";
   if (!type.includes("application/json")) {
-    throw new Error(`Not connected to API at ${getBackendUrl()}`);
+    throw new Error(`Not connected to API at ${getApiRootUrl()} (got ${res.status})`);
   }
 
   if (res.status === 401) return false;

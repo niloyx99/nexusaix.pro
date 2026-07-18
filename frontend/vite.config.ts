@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const backendUrl = (env.VITE_BACKEND_URL || "http://localhost:7777").replace(/\/$/, "");
 
   return {
-    base: "/app/",
+    base: "/",
     plugins: [
       react(),
       tailwindcss(),
@@ -28,8 +28,8 @@ export default defineConfig(({ mode }) => {
           categories: ["finance", "business"],
           lang: "en",
           dir: "ltr",
-          start_url: "/app/",
-          scope: "/app/",
+          start_url: "/",
+          scope: "/",
           icons: [
             {
               src: "user_profile.png",
@@ -53,8 +53,8 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff2}"],
-          navigateFallback: "/app/index.html",
-          navigateFallbackDenylist: [/^\/api/],
+          navigateFallback: "/index.html",
+          navigateFallbackDenylist: [/^\/api(-ai|\.ai)?(\/|$)/, /^\/health$/],
         },
         devOptions: {
           enabled: false,
@@ -71,6 +71,14 @@ export default defineConfig(({ mode }) => {
       port: 8889,
       strictPort: true,
       proxy: {
+        "/api-ai": {
+          target: backendUrl,
+          changeOrigin: true,
+        },
+        "/api.ai": {
+          target: backendUrl,
+          changeOrigin: true,
+        },
         "/api": {
           target: backendUrl,
           changeOrigin: true,

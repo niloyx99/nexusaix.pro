@@ -1,24 +1,24 @@
-/** Public API prefix on Hostinger. */
-export const API_PREFIX = "/api.ai";
+/** Preferred public API prefix (avoid /api.ai — dot paths break some browsers). */
+export const API_PREFIX = "/api-ai";
 
 /**
- * Normalize any path to /api.ai/...
- * Never doubles the prefix (fixes /api.ai/api.ai/...).
+ * Map /api/* and /api.ai/* → /api-ai/*
  */
 export function resolveApiPath(path: string): string {
   let normalized = path.startsWith("/") ? path : `/${path}`;
 
-  // Already on the public prefix
   if (normalized === API_PREFIX || normalized.startsWith(`${API_PREFIX}/`)) {
     return normalized;
   }
 
-  // Legacy /api → /api.ai
-  if (normalized === "/api" || normalized.startsWith("/api/")) {
-    normalized = `${API_PREFIX}${normalized.slice(4)}`;
+  if (normalized === "/api.ai" || normalized.startsWith("/api.ai/")) {
+    return `${API_PREFIX}${normalized.slice("/api.ai".length)}`;
   }
 
-  // Collapse accidental doubles
+  if (normalized === "/api" || normalized.startsWith("/api/")) {
+    return `${API_PREFIX}${normalized.slice(4)}`;
+  }
+
   while (normalized.startsWith(`${API_PREFIX}${API_PREFIX}`)) {
     normalized = normalized.slice(API_PREFIX.length);
   }

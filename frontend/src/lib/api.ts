@@ -1,14 +1,29 @@
-/** Backend base URL from frontend/.env (VITE_BACKEND_URL). Required for split hosting. */
+/** Backend base URL from Vite env. Local + Hostinger both work. */
 import { resolveApiPath } from "./apiPaths";
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || "").replace(/\/$/, "");
+const DEFAULT_PROD_BACKEND = "https://nexusaix.pro";
+
+function normalizeBackendOrigin(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, "");
+  for (let i = 0; i < 5; i++) {
+    const next = url
+      .replace(/\/api-ai$/i, "")
+      .replace(/\/api\.ai$/i, "")
+      .replace(/\/api$/i, "");
+    if (next === url) break;
+    url = next.replace(/\/+$/, "");
+  }
+  return url;
+}
+
+const BACKEND_URL = normalizeBackendOrigin(
+  import.meta.env.VITE_BACKEND_URL ||
+    (import.meta.env.PROD ? DEFAULT_PROD_BACKEND : "http://localhost:7777")
+);
 
 export function apiUrl(path: string): string {
   const normalized = resolveApiPath(path);
-  if (!BACKEND_URL) {
-    console.warn("VITE_BACKEND_URL is empty — API calls use same origin.");
-  }
-  return BACKEND_URL ? `${BACKEND_URL}${normalized}` : normalized;
+  return `${BACKEND_URL}${normalized}`;
 }
 
 export function getBackendUrl(): string {

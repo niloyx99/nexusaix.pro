@@ -1,6 +1,7 @@
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import analyzeRouter from "./routes/analyze.js";
@@ -11,31 +12,42 @@ import licensesRouter from "./routes/licenses.js";
 import adminLicensesRouter from "./routes/adminLicenses.js";
 import analyticsRouter from "./routes/analytics.js";
 import newsRouter from "./routes/news.js";
-import { checkMarketDataHealth, startMarketDataPolling } from "./services/marketDataClient.js";
-import { startChartAnalyticsResolver } from "./services/chartAnalytics.js";
-import { startNewsAnalysisScheduler, bootstrapNewsAnalysis } from "./services/newsBatch.js";
+import { checkMarketDataHealth, startMarketDataPolling } from "./market/marketDataClient.js";
+import { startChartAnalyticsResolver } from "./market/chartAnalytics.js";
+import { startNewsAnalysisScheduler, bootstrapNewsAnalysis } from "./news/newsBatch.js";
 import { connectMongo, disconnectMongo } from "./db/mongo.js";
 import { migrateJsonToMongoIfNeeded } from "./db/migrateFromJson.js";
-import { loadMarketSnapshotCache } from "./services/marketSnapshotCache.js";
+import { loadMarketSnapshotCache } from "./market/marketSnapshotCache.js";
 import { getAllowedOrigins, isAllowedOrigin } from "./config/cors.js";
-import { API_PREFIX } from "./config/paths.js";
+import { API_PREFIX, API_PREFIX_DOT, LEGACY_API_PREFIX } from "./config/paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, "..");
 
 dotenv.config({ path: path.join(backendRoot, ".env") });
+dotenv.config({ path: path.join(backendRoot, ".env.local"), override: true });
+// Hostinger combined app: also load root .env when present
+dotenv.config({ path: path.join(backendRoot, "..", ".env") });
+
+function fsExists(p: string): boolean {
+  try {
+    return fs.existsSync(p);
+  } catch {
+    return false;
+  }
+}
 
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = Number(process.env.PORT) || 7777;
 
-function mountApiRoutes(app: express.Application): void {
-  app.use(`${API_PREFIX}/licenses`, licensesRouter);
-  app.use(`${API_PREFIX}/admin/licenses`, adminLicensesRouter);
-  app.use(`${API_PREFIX}/analyze`, analyzeRouter);
-  app.use(`${API_PREFIX}/market-data`, marketDataRouter);
-  app.use(`${API_PREFIX}/signals`, signalsRouter);
-  app.use(`${API_PREFIX}/analytics`, analyticsRouter);
-  app.use(`${API_PREFIX}/news`, newsRouter);
+function mountApiRoutes(app: express.Application, prefix: string): void {
+  app.use(`${prefix}/licenses`, licensesRouter);
+  app.use(`${prefix}/admin/licenses`, adminLicensesRouter);
+  app.use(`${prefix}/analyze`, analyzeRouter);
+  app.use(`${prefix}/market-data`, marketDataRouter);
+  app.use(`${prefix}/signals`, signalsRouter);
+  app.use(`${prefix}/analytics`, analyticsRouter);
+  app.use(`${prefix}/news`, newsRouter);
 }
 
 async function startServer() {
@@ -70,8 +82,9 @@ async function startServer() {
           console.warn(`CORS allowing unknown origin in development: ${origin}`);
           return callback(null, true);
         }
+        // Never throw — throwing breaks preflight and shows "Failed to fetch" in browsers
         console.warn(`CORS blocked origin: ${origin}`);
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
+        return callback(null, false);
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -82,6 +95,7 @@ async function startServer() {
         "X-Device-Fingerprint",
         "X-Admin-Password",
         "X-Requested-With",
+        "Accept",
       ],
       exposedHeaders: ["X-Request-Id"],
       maxAge: 86400,
@@ -100,14 +114,14 @@ async function startServer() {
     });
   });
 
-  app.get("/", (_req, res) => {
+  const apiRootHandler = (_req: express.Request, res: express.Response) => {
     res.status(200).json({
       success: true,
-      service: "nexus-ai",
-      mode: "api-only",
-      health: "/health",
-      api: {
-        health: `${API_PREFIX}/health`,
+      service: "nexus-ai-api",
+      base: API_PREFIX,
+      aliases: [API_PREFIX, API_PREFIX_DOT, LEGACY_API_PREFIX],
+      health: `${API_PREFIX}/health`,
+      endpoints: {
         licenses: `${API_PREFIX}/licenses`,
         adminLicenses: `${API_PREFIX}/admin/licenses`,
         analyze: `${API_PREFIX}/analyze`,
@@ -118,10 +132,72 @@ async function startServer() {
       },
       timestamp: new Date().toISOString(),
     });
-  });
+  };
+
+  // Public API roots: /api-ai (preferred), /api.ai (alias), /api (legacy)
+  app.get([API_PREFIX, `${API_PREFIX}/`, API_PREFIX_DOT, `${API_PREFIX_DOT}/`, LEGACY_API_PREFIX, `${LEGACY_API_PREFIX}/`], apiRootHandler);
 
   app.use(statusRouter);
-  mountApiRoutes(app);
+  mountApiRoutes(app, API_PREFIX);
+  mountApiRoutes(app, API_PREFIX_DOT);
+  mountApiRoutes(app, LEGACY_API_PREFIX);
+
+  // Combined Hostinger deploy: frontend at / , API at /api.ai/*
+  const frontendDist = path.join(backendRoot, "..", "frontend", "dist");
+  const publicRoot = path.join(backendRoot, "public", "app");
+  const staticRoot = fsExists(frontendDist)
+    ? frontendDist
+    : fsExists(publicRoot)
+      ? publicRoot
+      : null;
+
+  if (staticRoot) {
+    app.use(
+      express.static(staticRoot, {
+        index: "index.html",
+        maxAge: isProduction ? "1h" : 0,
+        fallthrough: true,
+      })
+    );
+    // SPA fallback — never steal API / health paths
+    app.get("*", (req, res, next) => {
+      const p = req.path;
+      if (
+        p === "/health" ||
+        p === API_PREFIX ||
+        p.startsWith(`${API_PREFIX}/`) ||
+        p === API_PREFIX_DOT ||
+        p.startsWith(`${API_PREFIX_DOT}/`) ||
+        p === LEGACY_API_PREFIX ||
+        p.startsWith(`${LEGACY_API_PREFIX}/`)
+      ) {
+        return next();
+      }
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
+      res.sendFile(path.join(staticRoot, "index.html"));
+    });
+    console.log(`Serving frontend from ${staticRoot} at /`);
+  } else {
+    app.get("/", (_req, res) => {
+      res.status(200).json({
+        success: true,
+        service: "nexus-ai",
+        mode: "api-only",
+        health: "/health",
+        api: {
+          health: `${API_PREFIX}/health`,
+          licenses: `${API_PREFIX}/licenses`,
+          adminLicenses: `${API_PREFIX}/admin/licenses`,
+          analyze: `${API_PREFIX}/analyze`,
+          marketData: `${API_PREFIX}/market-data`,
+          signals: `${API_PREFIX}/signals`,
+          analytics: `${API_PREFIX}/analytics`,
+          news: `${API_PREFIX}/news`,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    });
+  }
 
   app.use((req, res) => {
     res.status(404).json({
