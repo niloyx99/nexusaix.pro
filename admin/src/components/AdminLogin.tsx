@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { Lock, Loader2, Shield, AlertCircle } from "lucide-react";
 import { adminLogin, adminLogout } from "../lib/storage";
 import { verifyAdminPassword } from "../lib/api";
-import { getBackendUrl } from "../lib/backend";
+import { getApiRootUrl } from "../lib/backend";
 
 interface AdminLoginProps {
   onSuccess: () => void;
@@ -41,7 +41,7 @@ export default function AdminLogin({ onSuccess }: AdminLoginProps) {
       const message = err instanceof Error ? err.message : "Login failed.";
       setError(
         message.includes("fetch") || message.includes("Network")
-          ? `Cannot reach backend at ${getBackendUrl()}.`
+          ? `Cannot reach backend at ${getApiRootUrl()}.`
           : message
       );
     } finally {
@@ -62,7 +62,7 @@ export default function AdminLogin({ onSuccess }: AdminLoginProps) {
           </div>
           <h1 className="text-xl font-black tracking-[0.2em] text-white">NEXUS AI</h1>
           <p className="text-[12px] text-white/45 font-medium">Admin Panel — Secure Login</p>
-          <p className="text-[10px] text-white/25 font-mono break-all">{getBackendUrl()}</p>
+          <p className="text-[10px] text-white/25 font-mono break-all">{getApiRootUrl()}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
