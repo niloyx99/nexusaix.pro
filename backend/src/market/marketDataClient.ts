@@ -9,11 +9,13 @@ import {
 } from "./marketSnapshotCache.js";
 import { mergeCandlesByTimestamp } from "./yahooForexCandles.js";
 
+/** VPS Quotex candle API — /health /pairs /last?pair=&n= */
 const MARKET_API_URL = (
-  process.env.QUOTEX_MARKET_API_URL || "https://quotex-data-1n2b.onrender.com"
+  process.env.QUOTEX_MARKET_API_URL || "http://161.248.189.73:1339"
 ).replace(/\/$/, "");
 
-const USE_LEGACY_PATHS = process.env.QUOTEX_MARKET_LEGACY === "true";
+/** Prefer VPS-style /health /pairs /last — set QUOTEX_MARKET_LEGACY=false for /api/markets/*. */
+const USE_LEGACY_PATHS = process.env.QUOTEX_MARKET_LEGACY !== "false";
 
 export interface MarketCandle {
   date_time: string;
@@ -47,13 +49,27 @@ export interface MarketCandlesResponse {
 interface MarketSnapshotRow {
   pair: string;
   payout: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
   candle_count: number;
-  last_fetch: number | null;
-  last_error: string | null;
+  last_fetch?: number | null;
+  last_error?: string | null;
+  latest_time?: string;
+}
+
+interface RawLegacyCandle {
+  timestamp?: number;
+  date?: string;
+  time?: string;
+  date_time?: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  tick_volume?: number;
+  payout?: number;
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
@@ -78,6 +94,21 @@ const DISPLAY_NAMES: Record<string, string> = {
   UKBRENT: "UKBrent",
   XAGUSD: "Silver",
   XAUUSD: "Gold",
+  AXP: "American Express",
+  BA: "Boeing",
+  FB: "Meta",
+  INTC: "Intel",
+  JNJ: "Johnson & Johnson",
+  MCD: "McDonald's",
+  MSFT: "Microsoft",
+  PFE: "Pfizer",
+  AXJAUD: "Australia 200",
+  F40EUR: "France 40",
+  FTSGBP: "UK 100",
+  HSIHKD: "Hong Kong 50",
+  IBXEUR: "Spain 35",
+  JPXJPY: "Japan 225",
+  STXEUR: "Euro Stoxx 50",
 };
 
 const TITLE_TO_PAIR: Record<string, string> = {
@@ -102,6 +133,15 @@ const TITLE_TO_PAIR: Record<string, string> = {
   UKBRENT: "UKBRENT",
   SILVER: "XAGUSD",
   GOLD: "XAUUSD",
+  AMERICANEXPRESS: "AXP",
+  BOEING: "BA",
+  META: "FB",
+  FACEBOOK: "FB",
+  INTEL: "INTC",
+  JOHNSONJOHNSON: "JNJ",
+  MCDONALDS: "MCD",
+  MICROSOFT: "MSFT",
+  PFIZER: "PFE",
 };
 
 async function fetchJson<T>(path: string, attempts = 1, timeoutMs = 8000): Promise<T | null> {
@@ -145,13 +185,53 @@ let cachedPairs: MarketPairInfo[] = [];
 let cachedPairsAt = 0;
 const PAIRS_CACHE_MS = 20_000;
 
+function normalizeCandle(raw: RawLegacyCandle): MarketCandle | null {
+  const open = Number(raw.open);
+  const high = Number(raw.high);
+  const low = Number(raw.low);
+  const close = Number(raw.close);
+  if (![open, high, low, close].every(Number.isFinite)) return null;
+
+  let timestamp = Number(raw.timestamp);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    const date = String(raw.date || "").trim();
+    const time = String(raw.time || "").trim();
+    const parsed = Date.parse(date && time ? `${date}T${time}Z` : String(raw.date_time || ""));
+    timestamp = Number.isFinite(parsed) ? Math.floor(parsed / 1000) : Math.floor(Date.now() / 1000);
+  }
+
+  // Guard absurd future timestamps from bad clocks
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (timestamp > nowSec + 86400 * 365) {
+    const date = String(raw.date || "").trim();
+    const time = String(raw.time || "").trim();
+    const parsed = Date.parse(date && time ? `${date}T${time}Z` : "");
+    if (Number.isFinite(parsed)) timestamp = Math.floor(parsed / 1000);
+  }
+
+  return {
+    open,
+    high,
+    low,
+    close,
+    tick_volume: Number(raw.tick_volume) || 0,
+    timestamp,
+    date_time: new Date(timestamp * 1000).toISOString(),
+  };
+}
+
 function rowToPairInfo(row: MarketSnapshotRow): MarketPairInfo {
+  let lastFetch = row.last_fetch ?? null;
+  if (lastFetch == null && row.latest_time) {
+    const parsed = Date.parse(row.latest_time.replace(" ", "T") + "Z");
+    if (Number.isFinite(parsed)) lastFetch = Math.floor(parsed / 1000);
+  }
   return {
     pair: row.pair,
     payout: row.payout,
     candle_count: row.candle_count,
-    last_fetch: row.last_fetch,
-    last_error: row.last_error,
+    last_fetch: lastFetch,
+    last_error: row.last_error ?? null,
     open: row.open,
     high: row.high,
     low: row.low,
@@ -190,10 +270,14 @@ function ingestSnapshotRows(rows: MarketSnapshotRow[]): MarketPairInfo[] {
 }
 
 export async function refreshMarketSnapshots(): Promise<MarketPairInfo[]> {
-  const rows = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 7000);
-  if (rows?.length) {
-    return ingestSnapshotRows(rows);
+  if (USE_LEGACY_PATHS) {
+    const rows = await fetchJson<MarketSnapshotRow[]>("/pairs", 2, 12000);
+    if (rows?.length) return ingestSnapshotRows(rows);
+    return cachedPairs;
   }
+
+  const rows = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 12000);
+  if (rows?.length) return ingestSnapshotRows(rows);
   return cachedPairs;
 }
 
@@ -245,7 +329,8 @@ export async function checkMarketDataHealth(options?: {
     status: string;
     total_pairs?: number;
     last_update?: string;
-  }>(USE_LEGACY_PATHS ? "/health" : "/api/health", 2, 6000);
+    latest_candle_time?: string;
+  }>(USE_LEGACY_PATHS ? "/health" : "/api/health", 3, 15000);
 
   if (!health || health.status !== "ok") {
     const offline = { status: "offline" as const, url: MARKET_API_URL };
@@ -256,9 +341,13 @@ export async function checkMarketDataHealth(options?: {
   if (!cachedPairs.length || Date.now() - cachedPairsAt > PAIRS_CACHE_MS) {
     const snapshots = await refreshMarketSnapshots();
     if (!snapshots.length) {
-      const offline = { status: "offline" as const, url: MARKET_API_URL };
-      cachedHealth = { at: Date.now(), value: offline };
-      return offline;
+      // Still mark ok if /health is ok — probe one candle as fallback
+      const probe = await fetchLegacyCandles("EURUSD_otc", 3);
+      if (!probe?.candles?.length) {
+        const offline = { status: "offline" as const, url: MARKET_API_URL };
+        cachedHealth = { at: Date.now(), value: offline };
+        return offline;
+      }
     }
   }
 
@@ -267,18 +356,16 @@ export async function checkMarketDataHealth(options?: {
     url: MARKET_API_URL,
     total_pairs: health.total_pairs ?? cachedPairs.length,
     active_pairs: health.total_pairs ?? cachedPairs.length,
-    last_update: health.last_update,
+    last_update: health.last_update || health.latest_candle_time,
   };
   cachedHealth = { at: Date.now(), value };
   return value;
 }
 
-/** Instant readiness check using polling cache (no network if warm). */
 export function isMarketDataReady(): boolean {
   return Boolean(
     cachedHealth?.value.status === "ok" &&
-      Date.now() - (cachedHealth?.at ?? 0) < HEALTH_CACHE_MS * 2 &&
-      cachedPairs.length > 0
+      Date.now() - (cachedHealth?.at ?? 0) < HEALTH_CACHE_MS * 2
   );
 }
 
@@ -296,14 +383,41 @@ async function fetchLegacyCandles(
   pair: string,
   limit: number
 ): Promise<MarketCandlesResponse | null> {
-  return fetchJson<MarketCandlesResponse>(
-    `/last?pair=${encodeURIComponent(pair)}&n=${limit}&timestamp=1`,
-    1,
-    6000
-  );
+  if (!isAllowedMarketPair(pair)) return null;
+
+  const raw = await fetchJson<{
+    pair?: string;
+    payout?: number;
+    count?: number;
+    candles?: RawLegacyCandle[];
+  }>(`/last?pair=${encodeURIComponent(pair)}&n=${limit}&timestamp=1`, 2, 12000);
+
+  if (!raw?.candles?.length) return null;
+
+  const candles = raw.candles
+    .map(normalizeCandle)
+    .filter((c): c is MarketCandle => c !== null)
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+
+  if (!candles.length) return null;
+
+  const last = candles[candles.length - 1];
+  upsertSnapshotCandle(pair, {
+    open: last.open,
+    high: last.high,
+    low: last.low,
+    close: last.close,
+    last_fetch: last.timestamp ?? Math.floor(Date.now() / 1000),
+  });
+
+  return {
+    pair: raw.pair || pair,
+    payout: Number(raw.payout) || Number(raw.candles[0]?.payout) || 0,
+    count: candles.length,
+    candles,
+  };
 }
 
-/** Historical M1 candles from Quotex feed (works for OTC + REAL). */
 export async function fetchQuotexHistoricalCandles(
   pair: string,
   limit = 120
@@ -312,88 +426,74 @@ export async function fetchQuotexHistoricalCandles(
   return data?.candles ?? [];
 }
 
-/**
- * Fast path for chart analysis: use in-memory candles first.
- * Only hit remote history when local cache is too thin.
- */
 export async function getRecentCandles(
   pair: string,
   limit = 30
 ): Promise<MarketCandlesResponse | null> {
-  if (USE_LEGACY_PATHS) {
-    return fetchLegacyCandles(pair, limit);
+  // VPS /last is the primary source — allow up to 180 for overnight signal checks
+  const remote = await fetchLegacyCandles(pair, Math.min(Math.max(limit, 40), 180));
+  if (remote?.candles?.length) {
+    const info = {
+      pair: remote.pair,
+      payout: remote.payout,
+      candle_count: remote.count,
+      last_fetch: remote.candles[remote.candles.length - 1]?.timestamp ?? null,
+      last_error: null as string | null,
+      open: remote.candles[remote.candles.length - 1]?.open,
+      high: remote.candles[remote.candles.length - 1]?.high,
+      low: remote.candles[remote.candles.length - 1]?.low,
+      close: remote.candles[remote.candles.length - 1]?.close,
+    };
+    const idx = cachedPairs.findIndex(
+      (row) => row.pair.toUpperCase() === pair.toUpperCase()
+    );
+    if (idx >= 0) cachedPairs[idx] = info;
+    else cachedPairs.push(info);
+    cachedPairsAt = Date.now();
+
+    return {
+      pair: remote.pair,
+      payout: remote.payout,
+      count: remote.candles.length,
+      candles: remote.candles.slice(-limit),
+    };
   }
+
+  const cached = getCachedCandles(pair, limit);
+  if (!cached.length) return null;
 
   const info = await getPairInfo(pair);
-  if (!info) return null;
-
-  let candles = getCachedCandles(pair, limit);
-
-  if (candles.length < Math.min(8, limit)) {
-    await refreshMarketSnapshots();
-    candles = getCachedCandles(pair, limit);
-  }
-
-  // Prefer cache; only fetch remote when critically thin (keeps analyze fast).
-  if (candles.length < Math.min(12, limit)) {
-    const historical = await fetchQuotexHistoricalCandles(pair, Math.min(Math.max(limit, 40), 100));
-    if (historical.length) {
-      candles = mergeCandlesByTimestamp(historical, candles);
-    }
-  }
-
-  if (!candles.length && info.open !== undefined) {
-    const ts = info.last_fetch ?? Math.floor(Date.now() / 1000);
-    candles = [
-      {
-        open: info.open,
-        high: info.high ?? info.open,
-        low: info.low ?? info.open,
-        close: info.close ?? info.open,
-        timestamp: ts,
-        date_time: new Date(ts * 1000).toISOString(),
-        tick_volume: 0,
-      },
-    ];
-  }
-
-  if (!candles.length) return null;
-
   return {
-    pair: info.pair,
-    payout: info.payout,
-    count: candles.length,
-    candles,
+    pair,
+    payout: info?.payout || 0,
+    count: cached.length,
+    candles: cached,
   };
 }
 
 export async function getAllPairs(): Promise<MarketPairInfo[]> {
-  if (USE_LEGACY_PATHS) {
-    const rows = await fetchJson<MarketPairInfo[]>("/pairs", 1, 7000);
-    return (rows ?? []).filter((row) => isAllowedMarketPair(row.pair));
-  }
-
   if (cachedPairs.length && Date.now() - cachedPairsAt < PAIRS_CACHE_MS) {
     return cachedPairs;
   }
 
-  const latest = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 7000);
-  if (latest?.length) {
-    return ingestSnapshotRows(latest);
+  if (USE_LEGACY_PATHS) {
+    const rows = await fetchJson<MarketSnapshotRow[]>("/pairs", 2, 12000);
+    if (rows?.length) return ingestSnapshotRows(rows);
+    return cachedPairs;
   }
+
+  const latest = await fetchJson<MarketSnapshotRow[]>("/api/markets/latest", 1, 12000);
+  if (latest?.length) return ingestSnapshotRows(latest);
 
   if (cachedPairs.length) return cachedPairs;
 
   const [otc, real] = await Promise.all([
-    fetchJson<MarketSnapshotRow[]>("/api/markets/otc", 1, 7000),
-    fetchJson<MarketSnapshotRow[]>("/api/markets/real", 1, 7000),
+    fetchJson<MarketSnapshotRow[]>("/api/markets/otc", 1, 12000),
+    fetchJson<MarketSnapshotRow[]>("/api/markets/real", 1, 12000),
   ]);
 
   if (otc?.length || real?.length) {
-    const allowed = ingestSnapshotRows([...(otc ?? []), ...(real ?? [])]);
-    cachedPairs = allowed;
-    cachedPairsAt = Date.now();
-    return allowed;
+    return ingestSnapshotRows([...(otc ?? []), ...(real ?? [])]);
   }
 
   return [];

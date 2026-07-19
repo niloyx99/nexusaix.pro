@@ -35,8 +35,8 @@ function parseOriginList(...values: (string | undefined)[]): string[] {
 
 export function getAllowedOrigins(): string[] {
   const fromEnv = parseOriginList(process.env.FRONTEND_URL, process.env.ADMIN_URL);
-  const isProd = process.env.NODE_ENV === "production";
-  if (isProd) return [...new Set(fromEnv)];
+  // Always allow local Vite ports so `npm run dev` works even when
+  // FRONTEND_URL/ADMIN_URL are set to hosted domains only.
   return [...new Set([...fromEnv, ...LOCAL_ORIGINS])];
 }
 

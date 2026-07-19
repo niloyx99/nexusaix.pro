@@ -42,7 +42,7 @@ export default function InstallAppBanner() {
   };
 
   return (
-    <div className="fixed bottom-[calc(var(--app-nav-height)+var(--app-nav-gap)+0.5rem)] left-3 right-3 z-[60] lg:left-auto lg:right-6 lg:max-w-sm">
+    <div className="fixed bottom-[calc(var(--app-safe-bottom)+0.75rem)] left-3 right-3 z-[60] lg:left-auto lg:right-6 lg:max-w-sm">
       <div className="flex items-center gap-3 rounded-xl border border-amber-400/30 bg-[#12151a]/95 backdrop-blur-xl px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-400/25">
           <Download className="h-5 w-5 text-amber-300" />

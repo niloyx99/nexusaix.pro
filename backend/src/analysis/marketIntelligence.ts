@@ -1,5 +1,6 @@
-import type { MarketCandle } from "./marketDataClient.js";
-import { analyzeWickAndVolume } from "./tradeSetupRules.js";
+﻿import type { MarketCandle } from "../market/marketDataClient.js";
+import { analyzeOtcSimpleEngine, analyzeWickAndVolume } from "./tradeSetupRules.js";
+import { analyzeLmpConfluence, type LmpConfluence } from "./lmpConfluence.js";
 
 export type Direction = "UP" | "DOWN" | "SIDEWAYS";
 export type Bias = "BULLISH" | "BEARISH" | "NEUTRAL";
@@ -37,6 +38,8 @@ export interface MarketIntelligence {
   otcInsight: string;
   summaryMarkdown: string;
   fusionBullets: string[];
+  /** Liquidity + Momentum + Pressure confluence (fast bot logic) */
+  lmp?: LmpConfluence;
 }
 
 interface ParsedCandle {
@@ -137,6 +140,16 @@ function nearestLevel(price: number, levels: number[], side: "below" | "above"):
   );
 }
 
+/** Equal-high / equal-low pool: 2+ touches within tight band = stop cluster. */
+function countEqualTouches(levels: number[], target: number, tolPct = 0.00028): number {
+  if (!Number.isFinite(target) || target === 0) return 0;
+  return levels.filter((l) => Math.abs(l - target) / Math.abs(target) <= tolPct).length;
+}
+
+/**
+ * Liquidity mask: only real stop-hunt sweeps.
+ * Requires pierce + close back inside + rejection wick (masks fake breakouts).
+ */
 function detectLiquiditySweep(candles: ParsedCandle[]): MarketIntelligence["liquiditySweep"] {
   if (candles.length < 6) {
     return { detected: false, type: "NONE", description: "Insufficient candles for liquidity scan." };
@@ -146,32 +159,73 @@ function detectLiquiditySweep(candles: ParsedCandle[]): MarketIntelligence["liqu
   const last = candles[candles.length - 1];
   const swingHighs = findSwingHighs(prior);
   const swingLows = findSwingLows(prior);
+  const lookback = prior.slice(-12);
 
-  const recentHigh = swingHighs.length ? Math.max(...swingHighs.slice(-3)) : Math.max(...prior.slice(-5).map((c) => c.high));
-  const recentLow = swingLows.length ? Math.min(...swingLows.slice(-3)) : Math.min(...prior.slice(-5).map((c) => c.low));
+  const recentHigh = swingHighs.length
+    ? Math.max(...swingHighs.slice(-4))
+    : Math.max(...lookback.slice(-6).map((c) => c.high));
+  const recentLow = swingLows.length
+    ? Math.min(...swingLows.slice(-4))
+    : Math.min(...lookback.slice(-6).map((c) => c.low));
 
-  // BSL sweep: wick above swing high, close back below (smart money sell setup)
-  if (last.high > recentHigh && last.close < recentHigh) {
+  const upperRatio = last.upperWick / last.range;
+  const lowerRatio = last.lowerWick / last.range;
+  const bodyRatio = last.bodySize / last.range;
+  const avgRange = avg(lookback.map((c) => c.range)) || last.range;
+  const pierceMin = Math.max(avgRange * 0.08, last.range * 0.12);
+
+  const poolHighTouches = countEqualTouches(
+    lookback.map((c) => c.high),
+    recentHigh
+  );
+  const poolLowTouches = countEqualTouches(
+    lookback.map((c) => c.low),
+    recentLow
+  );
+
+  // BSL: pierce above liquidity, rejection wick, close back below level (not a clean breakout)
+  const bslPierce = last.high - recentHigh;
+  const bslSweep =
+    bslPierce >= pierceMin * 0.35 &&
+    last.close < recentHigh &&
+    last.close <= last.high - last.range * 0.35 &&
+    upperRatio >= 0.28 &&
+    bodyRatio <= 0.55 &&
+    // Mask continuation breakouts: close must not stay above the pool
+    last.close < recentHigh + avgRange * 0.02;
+
+  if (bslSweep) {
+    const pooled = poolHighTouches >= 2 ? " (equal-high pool masked)" : "";
     return {
       detected: true,
       type: "BSL_SWEEP",
-      description: `Buy-side liquidity swept above **${recentHigh.toFixed(5)}** — price wicked high then closed back inside (bearish SMC grab).`,
+      description: `Buy-side liquidity swept above **${recentHigh.toFixed(5)}**${pooled} — upper shadow rejected, close back inside (bearish grab).`,
     };
   }
 
-  // SSL sweep: wick below swing low, close back above (smart money buy setup)
-  if (last.low < recentLow && last.close > recentLow) {
+  // SSL: pierce below liquidity, rejection wick, close back above level
+  const sslPierce = recentLow - last.low;
+  const sslSweep =
+    sslPierce >= pierceMin * 0.35 &&
+    last.close > recentLow &&
+    last.close >= last.low + last.range * 0.35 &&
+    lowerRatio >= 0.28 &&
+    bodyRatio <= 0.55 &&
+    last.close > recentLow - avgRange * 0.02;
+
+  if (sslSweep) {
+    const pooled = poolLowTouches >= 2 ? " (equal-low pool masked)" : "";
     return {
       detected: true,
       type: "SSL_SWEEP",
-      description: `Sell-side liquidity swept below **${recentLow.toFixed(5)}** — price wicked low then closed back inside (bullish SMC grab).`,
+      description: `Sell-side liquidity swept below **${recentLow.toFixed(5)}**${pooled} — lower shadow rejected, close back inside (bullish grab).`,
     };
   }
 
   return {
     detected: false,
     type: "NONE",
-    description: "No fresh liquidity sweep on the latest candle.",
+    description: "No clean liquidity sweep — fake breakout / thin wick masked out.",
   };
 }
 
@@ -191,6 +245,67 @@ function detectPriceAction(candles: ParsedCandle[]): MarketIntelligence["priceAc
 
   const prev = candles[candles.length - 2];
   const last = candles[candles.length - 1];
+  const prior = candles.slice(0, -1);
+  const swingHigh = prior.length
+    ? Math.max(...prior.slice(-8).map((c) => c.high))
+    : last.high;
+  const swingLow = prior.length
+    ? Math.min(...prior.slice(-8).map((c) => c.low))
+    : last.low;
+
+  const upperWickRatio = last.upperWick / last.range;
+  const lowerWickRatio = last.lowerWick / last.range;
+  const bodyRatio = last.bodySize / last.range;
+  const atSupply = last.high >= swingHigh * 0.9997;
+  const atDemand = last.low <= swingLow * 1.0003;
+
+  // Shadow rejection first (priority over breakout noise)
+  const upperReject =
+    upperWickRatio >= (atSupply ? 0.38 : 0.48) &&
+    bodyRatio <= 0.42 &&
+    upperWickRatio > lowerWickRatio + 0.12;
+  const lowerReject =
+    lowerWickRatio >= (atDemand ? 0.38 : 0.48) &&
+    bodyRatio <= 0.42 &&
+    lowerWickRatio > upperWickRatio + 0.12;
+
+  if (upperReject) {
+    return {
+      pattern: "SHOOTING_STAR",
+      rejection: true,
+      description: atSupply
+        ? "Upper shadow rejection at liquidity/supply — sellers defended highs."
+        : "Upper rejection wick — supply rejected higher prices.",
+    };
+  }
+
+  if (lowerReject) {
+    return {
+      pattern: "HAMMER",
+      rejection: true,
+      description: atDemand
+        ? "Lower shadow rejection at liquidity/demand — buyers defended lows."
+        : "Lower rejection wick — demand absorbed sell pressure.",
+    };
+  }
+
+  // Twin shadow: last 2 candles same-side rejection
+  const prevUpper = prev.upperWick / prev.range;
+  const prevLower = prev.lowerWick / prev.range;
+  if (upperWickRatio >= 0.35 && prevUpper >= 0.35 && bodyRatio <= 0.5) {
+    return {
+      pattern: "SHOOTING_STAR",
+      rejection: true,
+      description: "Twin upper shadows — repeated sell rejection.",
+    };
+  }
+  if (lowerWickRatio >= 0.35 && prevLower >= 0.35 && bodyRatio <= 0.5) {
+    return {
+      pattern: "HAMMER",
+      rejection: true,
+      description: "Twin lower shadows — repeated buy rejection.",
+    };
+  }
 
   const bullishEngulf =
     last.bullish &&
@@ -207,7 +322,7 @@ function detectPriceAction(candles: ParsedCandle[]): MarketIntelligence["priceAc
   if (bullishEngulf) {
     return {
       pattern: "BULLISH_ENGULFING",
-      rejection: false,
+      rejection: lowerWickRatio >= 0.25,
       description: "Bullish engulfing — buyers absorbed prior candle (price action confirmation).",
     };
   }
@@ -215,31 +330,21 @@ function detectPriceAction(candles: ParsedCandle[]): MarketIntelligence["priceAc
   if (bearishEngulf) {
     return {
       pattern: "BEARISH_ENGULFING",
-      rejection: false,
+      rejection: upperWickRatio >= 0.25,
       description: "Bearish engulfing — sellers absorbed prior candle (price action confirmation).",
     };
   }
 
-  const upperWickRatio = last.upperWick / last.range;
-  const lowerWickRatio = last.lowerWick / last.range;
-
-  if (upperWickRatio > 0.55 && last.bodySize / last.range < 0.35) {
+  // Indecision doji — do not treat as breakout
+  if (bodyRatio <= 0.18 && upperWickRatio >= 0.25 && lowerWickRatio >= 0.25) {
     return {
-      pattern: "SHOOTING_STAR",
-      rejection: true,
-      description: "Upper rejection wick — supply rejected higher prices (MSNR fresh resistance reaction).",
+      pattern: "INSIDE_BAR",
+      rejection: false,
+      description: "Doji / indecision — shadows both sides; wait for clear rejection.",
     };
   }
 
-  if (lowerWickRatio > 0.55 && last.bodySize / last.range < 0.35) {
-    return {
-      pattern: "HAMMER",
-      rejection: true,
-      description: "Lower rejection wick — demand absorbed sell pressure (MSNR fresh support reaction).",
-    };
-  }
-
-  if (last.bullish && last.close > prev.high) {
+  if (last.bullish && last.close > prev.high && bodyRatio >= 0.45 && upperWickRatio < 0.3) {
     return {
       pattern: "BULLISH_BREAKOUT",
       rejection: false,
@@ -247,7 +352,7 @@ function detectPriceAction(candles: ParsedCandle[]): MarketIntelligence["priceAc
     };
   }
 
-  if (last.bearish && last.close < prev.low) {
+  if (last.bearish && last.close < prev.low && bodyRatio >= 0.45 && lowerWickRatio < 0.3) {
     return {
       pattern: "BEARISH_BREAKOUT",
       rejection: false,
@@ -495,7 +600,82 @@ function scoreDirection(signals: {
   wickStrength?: number;
   volumeDir?: Direction;
   volumeStrength?: number;
+  lmp?: LmpConfluence;
 }): { direction: Direction; confidence: number } {
+  // —— OTC: classic first-version engine only (wick/PA/SMC/MSNR/MMXM/opposite) ——
+  if (signals.isOtc) {
+    let up = 0;
+    let down = 0;
+
+    if (signals.momentum === "BULLISH") up += 2;
+    if (signals.momentum === "BEARISH") down += 2;
+
+    if (signals.liquiditySweep.type === "SSL_SWEEP") up += 5;
+    if (signals.liquiditySweep.type === "BSL_SWEEP") down += 5;
+
+    if (signals.opposite.detected) {
+      if (signals.opposite.nextBias === "UP") up += 4;
+      if (signals.opposite.nextBias === "DOWN") down += 4;
+    }
+
+    if (signals.mmxm.model === "MMBM" && signals.mmxm.phase === "MANIPULATION") up += 3;
+    if (signals.mmxm.model === "MMSM" && signals.mmxm.phase === "MANIPULATION") down += 3;
+    if (signals.mmxm.phase === "EXPANSION" && signals.mmxm.model === "MMBM") up += 2;
+    if (signals.mmxm.phase === "EXPANSION" && signals.mmxm.model === "MMSM") down += 2;
+
+    if (signals.priceAction.pattern === "BULLISH_ENGULFING") up += 3;
+    if (signals.priceAction.pattern === "BEARISH_ENGULFING") down += 3;
+    if (signals.priceAction.pattern === "HAMMER") up += 2;
+    if (signals.priceAction.pattern === "SHOOTING_STAR") down += 2;
+    if (signals.priceAction.pattern === "BULLISH_BREAKOUT") up += 2;
+    if (signals.priceAction.pattern === "BEARISH_BREAKOUT") down += 2;
+
+    if (signals.fvg === "BULLISH_FVG") up += 1;
+    if (signals.fvg === "BEARISH_FVG") down += 1;
+
+    // Original OTC boosts — liquidity + opposite candle (no expansion/LMP/volume gates)
+    if (signals.liquiditySweep.detected) {
+      if (signals.liquiditySweep.type === "SSL_SWEEP") up += 3;
+      if (signals.liquiditySweep.type === "BSL_SWEEP") down += 3;
+    }
+    if (signals.opposite.detected) {
+      if (signals.opposite.nextBias === "UP") up += 3;
+      if (signals.opposite.nextBias === "DOWN") down += 3;
+    }
+
+    const total = up + down || 1;
+    const diff = up - down;
+
+    let direction: Direction = "SIDEWAYS";
+    if (diff >= 3) direction = "UP";
+    else if (diff <= -3) direction = "DOWN";
+
+    const dominant = Math.max(up, down);
+    let confidence = Math.min(97, Math.max(55, Math.round((dominant / total) * 100)));
+
+    if (
+      signals.opposite.detected &&
+      signals.liquiditySweep.detected &&
+      signals.opposite.nextBias === direction
+    ) {
+      confidence = Math.min(97, confidence + 10);
+    } else if (signals.opposite.detected && signals.opposite.nextBias === direction) {
+      confidence = Math.min(95, confidence + 6);
+    } else if (signals.liquiditySweep.detected) {
+      const sweepDir =
+        signals.liquiditySweep.type === "SSL_SWEEP"
+          ? "UP"
+          : signals.liquiditySweep.type === "BSL_SWEEP"
+            ? "DOWN"
+            : "SIDEWAYS";
+      if (sweepDir === direction) confidence = Math.min(94, confidence + 5);
+    }
+
+    if (direction === "SIDEWAYS") confidence = Math.min(confidence, 58);
+    return { direction, confidence };
+  }
+
+  // —— REAL: current multi-factor engine (unchanged) ——
   let up = 0;
   let down = 0;
 
@@ -525,7 +705,6 @@ function scoreDirection(signals: {
   if (signals.fvg === "BULLISH_FVG") up += 1;
   if (signals.fvg === "BEARISH_FVG") down += 1;
 
-  // Wick shadow + volume scoring (REAL & OTC)
   const ws = signals.wickStrength ?? 0;
   const vs = signals.volumeStrength ?? 0;
   if (signals.wickDir === "UP") up += ws;
@@ -533,43 +712,24 @@ function scoreDirection(signals: {
   if (signals.volumeDir === "UP") up += vs;
   if (signals.volumeDir === "DOWN") down += vs;
 
-  if (signals.isOtc) {
-    if (signals.expansion.active) {
-      if (signals.expansion.bias === "UP") {
-        up += 8;
-        down = Math.max(0, down - 6);
-      }
-      if (signals.expansion.bias === "DOWN") {
-        down += 8;
-        up = Math.max(0, up - 6);
-      }
-    } else {
-      if (signals.momentum === "BULLISH") up += 3;
-      if (signals.momentum === "BEARISH") down += 3;
-    }
-    if (signals.liquiditySweep.detected && signals.opposite.detected) {
-      if (signals.liquiditySweep.type === "SSL_SWEEP" && signals.opposite.nextBias === "UP") up += 4;
-      if (signals.liquiditySweep.type === "BSL_SWEEP" && signals.opposite.nextBias === "DOWN") down += 4;
-    }
-    if (signals.priceAction.rejection) {
-      if (signals.priceAction.pattern === "HAMMER") up += 3;
-      if (signals.priceAction.pattern === "SHOOTING_STAR") down += 3;
-    }
-  } else {
-    if (signals.momentum === "BULLISH") {
-      up += 3;
-      down = Math.max(0, down - 2);
-    }
-    if (signals.momentum === "BEARISH") {
-      down += 3;
-      up = Math.max(0, up - 2);
-    }
+  const lmp = signals.lmp;
+  if (lmp?.aligned) {
+    if (lmp.direction === "UP") up += 1;
+    if (lmp.direction === "DOWN") down += 1;
+  }
+
+  if (signals.momentum === "BULLISH") {
+    up += 3;
+    down = Math.max(0, down - 2);
+  }
+  if (signals.momentum === "BEARISH") {
+    down += 3;
+    up = Math.max(0, up - 2);
   }
 
   const total = up + down || 1;
   const diff = up - down;
 
-  // Lower threshold → fewer SIDEWAYS/HOLD from engine
   let direction: Direction = "SIDEWAYS";
   if (diff >= 2) direction = "UP";
   else if (diff <= -2) direction = "DOWN";
@@ -578,6 +738,10 @@ function scoreDirection(signals: {
 
   const dominant = Math.max(up, down);
   let confidence = Math.min(86, Math.max(56, Math.round(50 + (dominant / total) * 36)));
+
+  if (lmp?.aligned && lmp.direction === direction) {
+    confidence = Math.min(86, confidence + 2);
+  }
 
   if (
     signals.opposite.detected &&
@@ -599,6 +763,24 @@ function scoreDirection(signals: {
 
   if (ws >= 3 && signals.wickDir === direction) confidence = Math.min(88, confidence + 3);
   if (vs >= 2 && signals.volumeDir === direction) confidence = Math.min(88, confidence + 2);
+
+  if (
+    signals.priceAction.rejection &&
+    signals.liquiditySweep.detected &&
+    ((signals.liquiditySweep.type === "SSL_SWEEP" && direction === "UP") ||
+      (signals.liquiditySweep.type === "BSL_SWEEP" && direction === "DOWN"))
+  ) {
+    confidence = Math.min(90, confidence + 4);
+  }
+
+  if (
+    !signals.priceAction.rejection &&
+    !signals.liquiditySweep.detected &&
+    ws < 3 &&
+    direction !== "SIDEWAYS"
+  ) {
+    confidence = Math.max(54, confidence - 3);
+  }
 
   if (direction === "SIDEWAYS") confidence = Math.min(confidence, 58);
 
@@ -763,12 +945,93 @@ export function analyzeMarketIntelligence(
         nextBias: "SIDEWAYS",
         description: "Insufficient data.",
       },
-      otcInsight: "Waiting for more live candles.",
-      summaryMarkdown: "Not enough live candles for SMC/MSNR/MMXM scan.",
+      otcInsight: options.isOtc
+        ? "OTC · waiting candles for wick/volume/LMP."
+        : "Waiting for more live candles.",
+      summaryMarkdown: options.isOtc
+        ? "Not enough candles for OTC wick/volume/LMP."
+        : "Not enough live candles for market scan.",
       fusionBullets: [],
     };
   }
 
+  // —— OTC ONLY: wick + volume + LMP ——
+  if (options.isOtc) {
+    const simple = analyzeOtcSimpleEngine(candles);
+    const last = parsed[parsed.length - 1];
+    const upperR = last.upperWick / last.range;
+    const lowerR = last.lowerWick / last.range;
+    const rejection =
+      (upperR > 0.45 && last.bodySize / last.range < 0.4) ||
+      (lowerR > 0.45 && last.bodySize / last.range < 0.4);
+
+    const otcInsight =
+      options.payoutPercent && options.payoutPercent >= 85
+        ? "OTC high payout — wick + volume + LMP only."
+        : "OTC · wick/shadow + volume + LMP confluence.";
+
+    const fusionBullets = [
+      `**Engine**: OTC simple (wick + volume + LMP)`,
+      `**Next candle**: ${simple.direction} (${simple.confidence}%)`,
+      `**Momentum**: ${simple.momentum}`,
+      `**Wick**: ${simple.wickVol.labels[0] || simple.wickVol.wickDir} (str ${simple.wickVol.wickStrength})`,
+      `**Volume**: ratio ×${simple.wickVol.volumeRatio.toFixed(2)} · ${simple.wickVol.volumeDir} (str ${simple.wickVol.volumeStrength})`,
+      `**LMP**: L=${simple.lmp.liquidity} M=${simple.lmp.momentum} P=${simple.lmp.pressure}${simple.lmp.aligned ? " · ALIGNED" : ""}`,
+      ...simple.labels.map((l) => `**Signal**: ${l}`),
+      `**OTC**: ${otcInsight}`,
+    ];
+
+    return {
+      momentum: simple.momentum,
+      nextCandleDirection: simple.direction,
+      confidencePct: simple.confidence,
+      liquiditySweep: {
+        detected: simple.lmp.liquidity !== "SIDEWAYS",
+        type:
+          simple.lmp.liquidity === "UP"
+            ? "SSL_SWEEP"
+            : simple.lmp.liquidity === "DOWN"
+              ? "BSL_SWEEP"
+              : "NONE",
+        description: simple.lmp.labels.find((l) => /liq/i.test(l)) || "LMP liquidity leg",
+      },
+      mmxm: {
+        phase: "UNKNOWN",
+        model: "NONE",
+        description: "OTC simple engine — MMXM disabled.",
+      },
+      msnr: {
+        support: null,
+        resistance: null,
+        signal: "NONE",
+        description: "OTC simple engine — MSNR disabled.",
+      },
+      priceAction: {
+        pattern:
+          simple.wickVol.wickDir === "UP"
+            ? "HAMMER"
+            : simple.wickVol.wickDir === "DOWN"
+              ? "SHOOTING_STAR"
+              : "NONE",
+        rejection,
+        description: simple.wickVol.labels[0] || "Wick/volume scan",
+      },
+      oppositeCandleSignal: {
+        detected: simple.wickVol.wickStrength >= 4,
+        nextBias: simple.direction,
+        description: "Mapped from wick strength (OTC simple).",
+      },
+      otcInsight,
+      summaryMarkdown: [
+        "### OTC Simple Engine (Wick + Volume + LMP)",
+        fusionBullets.map((b) => `* ${b}`).join("\n"),
+      ].join("\n\n"),
+      fusionBullets,
+      lmp: simple.lmp,
+    };
+  }
+
+  // —— REAL: full engine ——
   const momentum = computeMomentum(parsed);
   const liquiditySweep = detectLiquiditySweep(parsed);
   const priceAction = detectPriceAction(parsed);
@@ -778,6 +1041,7 @@ export function analyzeMarketIntelligence(
   const fvg = detectFairValueGap(parsed);
   const expansion = detectConsecutiveExpansion(parsed);
   const wickVol = analyzeWickAndVolume(candles);
+  const lmp = analyzeLmpConfluence(candles);
 
   const { direction, confidence } = scoreDirection({
     momentum,
@@ -786,38 +1050,37 @@ export function analyzeMarketIntelligence(
     opposite: oppositeCandleSignal,
     mmxm,
     fvg,
-    isOtc: options.isOtc,
+    isOtc: false,
     expansion,
     wickDir: wickVol.wickDir,
     wickStrength: wickVol.wickStrength,
     volumeDir: wickVol.volumeDir,
     volumeStrength: wickVol.volumeStrength,
+    lmp,
   });
 
-  const otcInsight = options.isOtc
-    ? expansion.active
-      ? `${expansion.description} ${options.payoutPercent && options.payoutPercent >= 85 ? "High payout OTC pair." : ""}`
-      : options.payoutPercent && options.payoutPercent >= 85
-        ? "OTC market active — high payout pair; prioritize liquidity sweep + opposite-wick reversals (Quotex synthetic behavior)."
-        : "OTC market — watch for fake breakouts and quick mean-reversion after manipulation wicks."
-    : "REAL market — structure + session liquidity drives bias.";
+  const otcInsight = "REAL market — structure + session liquidity drives bias.";
 
   const fusionBullets = [
     `**Momentum**: ${momentum}`,
     `**Next candle bias**: ${direction} (${confidence}% engine confidence)`,
+    lmp.aligned
+      ? `**LMP**: aligned ${lmp.direction} (liq/mom/pressure)`
+      : lmp.direction !== "SIDEWAYS"
+        ? `**LMP**: ${lmp.direction} score ${lmp.score}/10`
+        : "**LMP**: mixed",
     `**Liquidity (SMC)**: ${liquiditySweep.description}`,
     `**MMXM**: ${mmxm.description}`,
     `**MSNR**: ${msnr.description}`,
     `**Price action**: ${priceAction.description}`,
     `**Opposite-candle model**: ${oppositeCandleSignal.description}`,
-    expansion.active ? `**OTC expansion**: ${expansion.description}` : "",
     `**FVG**: ${fvg === "NONE" ? "No active fair value gap" : fvg.replace("_", " ")}`,
-    `**OTC**: ${otcInsight}`,
+    `**Note**: ${otcInsight}`,
   ];
 
   const summaryMarkdown = [
-    "### Live Fusion Engine (SMC + MMXM + MSNR)",
-    fusionBullets.map((b) => `* ${b}`).join("\n"),
+    "### Live Fusion Engine (SMC + MMXM + MSNR + LMP)",
+    fusionBullets.filter(Boolean).map((b) => `* ${b}`).join("\n"),
   ].join("\n\n");
 
   return {
@@ -832,5 +1095,6 @@ export function analyzeMarketIntelligence(
     otcInsight,
     summaryMarkdown,
     fusionBullets,
+    lmp,
   };
 }

@@ -1,4 +1,4 @@
-import { Router, type Request, type Response, type NextFunction } from "express";
+﻿import { Router, type Request, type Response, type NextFunction } from "express";
 import {
   validateLicense,
   findLicenseByKey,
@@ -8,7 +8,7 @@ import {
   normalizeKey,
   isUnlimitedDaily,
   formatDailyLimit,
-} from "../services/licenseStore.js";
+} from "../license/licenseStore.js";
 import {
   getClientIp,
   getDeviceFingerprintFromRequest,
@@ -142,7 +142,7 @@ export async function requireValidatedLicense(
       return;
     }
 
-    const { validateLicenseForRequest } = await import("../services/licenseStore.js");
+    const { validateLicenseForRequest } = await import("../license/licenseStore.js");
     const { getDeviceFingerprintFromRequest } = await import("../utils/clientInfo.js");
     const fingerprint = getDeviceFingerprintFromRequest(req);
     const { license, usage } = await validateLicenseForRequest(key, fingerprint);
@@ -175,7 +175,7 @@ export async function requireActiveLicense(
       return;
     }
 
-    const { assertLicenseForRequest } = await import("../services/licenseStore.js");
+    const { assertLicenseForRequest } = await import("../license/licenseStore.js");
     const { getDeviceFingerprintFromRequest } = await import("../utils/clientInfo.js");
     const fingerprint = getDeviceFingerprintFromRequest(req);
     const { license, usage } = await assertLicenseForRequest(key, incrementBy, fingerprint);

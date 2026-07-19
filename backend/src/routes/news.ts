@@ -1,8 +1,8 @@
-import { Router } from "express";
-import { fetchDailyForexNews } from "../services/forexNewsClient.js";
-import { attachCachedAnalyses } from "../services/newsBatch.js";
-import { getCachedAnalysis } from "../services/newsAnalysis.js";
-import { findForexNewsEvent } from "../services/forexNewsClient.js";
+﻿import { Router } from "express";
+import { fetchDailyForexNews } from "../news/forexNewsClient.js";
+import { attachCachedAnalyses } from "../news/newsBatch.js";
+import { getCachedAnalysis } from "../news/newsAnalysis.js";
+import { findForexNewsEvent } from "../news/forexNewsClient.js";
 import { requireActiveLicense } from "./licenses.js";
 
 const router = Router();

@@ -1,6 +1,6 @@
-import { getPairInfo, quotexPairToDisplay, fetchQuotexHistoricalCandles } from "./marketDataClient.js";
-import { normalizeKey } from "./licenseStore.js";
-import { evaluateBinaryCandleOutcome } from "./binaryCandleOutcome.js";
+﻿import { getPairInfo, quotexPairToDisplay, fetchQuotexHistoricalCandles } from "./marketDataClient.js";
+import { normalizeKey } from "../license/licenseStore.js";
+import { evaluateBinaryCandleOutcome } from "../signals/binaryCandleOutcome.js";
 import { COLLECTIONS, getCollection } from "../db/mongo.js";
 import {
   analyticsDayKey,
@@ -10,7 +10,7 @@ import {
   signalAnalyticsDayKey,
   verificationMinuteForSignal,
 } from "./chartCandleLookup.js";
-import type { FusedAnalysisResult } from "./fusionAnalysis.js";
+import type { FusedAnalysisResult } from "../analysis/fusionAnalysis.js";
 
 const VERIFY_DELAY_MS = 65_000;
 const MAX_PENDING_MS = 10 * 60_000; // 10 min before giving up (was 5)

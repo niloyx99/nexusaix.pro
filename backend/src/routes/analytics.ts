@@ -1,9 +1,9 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { getLicenseKeyFromRequest } from "./licenses.js";
 import {
   getChartAnalyticsForLicense,
   resolvePendingChartSignals,
-} from "../services/chartAnalytics.js";
+} from "../market/chartAnalytics.js";
 
 const router = Router();
 

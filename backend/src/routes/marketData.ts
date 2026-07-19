@@ -1,7 +1,5 @@
-import { Router } from "express";
-import {
-  checkMarketDataHealth,
-} from "../services/marketDataClient.js";
+﻿import { Router } from "express";
+import { checkMarketDataHealth } from "../market/marketDataClient.js";
 import { API_PREFIX } from "../config/paths.js";
 
 const router = Router();

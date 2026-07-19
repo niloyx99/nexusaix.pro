@@ -28,6 +28,9 @@ function getApiKey(): string | null {
   return process.env.OPENROUTER_API_KEY || null;
 }
 
+/**
+ * Gemini gate for Future Signals — validates OI / Liquidation / Funding / VP / VWAP confluence.
+ */
 export async function confirmSignalsWithGemini(
   candidates: GeminiCandidate[],
   marketType: "REAL" | "OTC"
@@ -43,33 +46,38 @@ export async function confirmSignalsWithGemini(
     direction: c.direction,
     engineConfidence: c.confidence,
     engineScore: c.engineScore,
-    reasons: c.reasons.slice(0, 5),
+    reasons: c.reasons.slice(0, 6),
   }));
 
-  const prompt = `You are an elite ${marketType} 1-minute binary-options signal gatekeeper (Quotex, 1-step MTG).
+  const prompt = `You are an elite ${marketType} 1-minute Future Signal gatekeeper (Quotex binary, next candle only).
 
-Validate engine candidates for NEXT 1-minute candle only. Be STRICT — quality over quantity.
+Engine already scored each candidate with:
+Open Interest · Liquidation Data · Funding Rate · Volume Profile · VWAP (+ RSI/EMA/MACD).
 
-Approve ONLY when:
-- Liquidity sweep (BSL/SSL) + wick rejection align with direction, OR
-- Opposite-candle reversal + SMC/MMXM agree on next candle, OR
-- 3+ engine reasons align (momentum + MSNR + rejection) with NO conflict.
+Validate STRICTLY using those futures layers. Quality over quantity.
+
+Approve ONLY when reasons show clear confluence, e.g.:
+- VWAP reclaim/bounce (CALL) or VWAP lose/reject (PUT) aligned with direction, OR
+- Liquidation flush (long liq bounce / short liq drop) + Volume Profile POC/VAH/VAL agree, OR
+- Open Interest build + Funding / premium bias agree with direction, OR
+- 3+ futures-layer reasons align with NO conflict.
 
 Reject when:
-- Choppy / ranging / conflicting momentum
-- Weak snapshot-only momentum without sweep or rejection
-- Direction fights opposite-candle bias
-- Engine score below 70 feel
+- Conflicting OI vs Funding vs VWAP
+- Weak / single-layer only
+- Choppy value-area chop without break or rejection
+- Engine score feels below ~62–65
 
 Rules:
-- geminiConfidence 80+ required to approve (88+ for A+ setup)
-- Approve at most ~40% of candidates — reject the rest
-- Never approve all candidates blindly
+- geminiConfidence 78+ to approve (86+ for A+ setup)
+- Approve at most ~45% of candidates
+- Never approve all blindly
+- Note must cite which futures layer(s) you used (OI / Liq / Funding / VP / VWAP)
 
 Return ONLY raw JSON:
 {
   "rankings": [
-    { "pair": "EURUSD", "approved": true, "geminiConfidence": 86, "note": "SSL sweep + bullish rejection" }
+    { "pair": "EURUSD", "approved": true, "geminiConfidence": 86, "note": "VWAP reclaim + POC hold + OI longs" }
   ]
 }
 
@@ -83,7 +91,7 @@ ${JSON.stringify(payload, null, 2)}`;
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": openRouterReferer(),
-        "X-Title": "Nexus AI Signals",
+        "X-Title": "Nexus AI Future Signals",
       },
       body: JSON.stringify({
         model,

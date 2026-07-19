@@ -1,10 +1,13 @@
-import { Router } from "express";
-import { analyzeWithFusion } from "../services/fusionAnalysis.js";
+﻿import { Router } from "express";
+import {
+  analyzeOtcMarketChart,
+  analyzeRealMarketChart,
+} from "../analysis/fusionAnalysis.js";
 import { getLicenseKeyFromRequest, requireValidatedLicense } from "./licenses.js";
-import { recordChartAnalysisSignal } from "../services/chartAnalytics.js";
-import { checkMarketDataHealth, isMarketDataReady } from "../services/marketDataClient.js";
-import { incrementUsage } from "../services/licenseStore.js";
-import type { AnalysisSources } from "../services/fusionAnalysis.js";
+import { recordChartAnalysisSignal } from "../market/chartAnalytics.js";
+import { checkMarketDataHealth, isMarketDataReady } from "../market/marketDataClient.js";
+import { incrementUsage } from "../license/licenseStore.js";
+import type { AnalysisSources } from "../analysis/fusionAnalysis.js";
 
 const router = Router();
 
@@ -32,10 +35,25 @@ router.post("/", (req, res, next) => {
   void requireValidatedLicense(req, res, next);
 }, async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, marketMode } = req.body;
 
     if (!image) {
       return res.status(400).json({ error: "No image data provided" });
+    }
+
+    const preferredMarket =
+      marketMode === "real" || marketMode === "REAL"
+        ? ("REAL" as const)
+        : marketMode === "otc" || marketMode === "OTC"
+          ? ("OTC" as const)
+          : null;
+
+    if (!preferredMarket) {
+      return res.status(400).json({
+        error: "marketMode required",
+        message: 'Send marketMode: "real" or "otc". Analyzers are hard-separated.',
+        code: "INVALID_MARKET_MODE",
+      });
     }
 
     // Fast path: background polling keeps cache warm — skip slow health round-trip.
@@ -53,7 +71,11 @@ router.post("/", (req, res, next) => {
       }
     }
 
-    const result = await analyzeWithFusion(image);
+    // Hard split: Real and OTC never share an entry path
+    const result =
+      preferredMarket === "REAL"
+        ? await analyzeRealMarketChart(image)
+        : await analyzeOtcMarketChart(image);
 
     const geminiConnected = result.analysisSources.gemini.status === "ok";
     const marketDataConnected = result.analysisSources.marketData.status === "ok";

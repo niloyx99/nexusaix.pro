@@ -27,6 +27,7 @@ interface Signal {
   id: string;
   time: string;
   pair: string;
+  quotexPair?: string;
   direction: 'CALL' | 'PUT';
   duration: '1 Min';
   confidence: number;
@@ -35,7 +36,9 @@ interface Signal {
   reasons?: string[];
 }
 
-export default function SignalsScreen() {
+type SignalsScreenMode = 'generate' | 'check';
+
+export default function SignalsScreen({ mode = 'generate' }: { mode?: SignalsScreenMode }) {
   const [marketType, setMarketType] = useState<'REAL' | 'OTC'>('REAL');
   const [signalCount, setSignalCount] = useState<number | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -155,10 +158,15 @@ export default function SignalsScreen() {
       setCheckProgress(0);
       return;
     }
-    setCheckProgress(10);
+    setCheckProgress(18);
     const interval = setInterval(() => {
-      setCheckProgress((prev) => Math.min(92, prev + 8));
-    }, 400);
+      setCheckProgress((prev) => {
+        if (prev >= 94) return prev;
+        // Faster ramp so UI doesn't feel stuck while waiting on API
+        const step = prev < 50 ? 14 : prev < 80 ? 8 : 3;
+        return Math.min(94, prev + step);
+      });
+    }, 180);
     return () => clearInterval(interval);
   }, [isChecking]);
 
@@ -216,6 +224,8 @@ export default function SignalsScreen() {
 
   // Check every second if any generated signals match the current local time (hour:minute)
   useEffect(() => {
+    if (mode !== 'generate') return;
+
     const interval = setInterval(() => {
       if (generatedSignals.length === 0) return;
 
@@ -243,7 +253,7 @@ export default function SignalsScreen() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [generatedSignals, lastCheckedMinute, soundEnabled]);
+  }, [mode, generatedSignals, lastCheckedMinute, soundEnabled]);
 
   const handleGenerateSignals = async () => {
     if (!signalCount) return;
@@ -301,9 +311,15 @@ export default function SignalsScreen() {
     text += `╔══☠️ ALDI FX OFFICIAL ☠️══╗\n\n`;
 
     generatedSignals.forEach((sig) => {
-      // Format to matching pattern e.g. M1;EURUSD;14:35;CALL
-      const cleanPair = sig.pair.replace('/', '').replace('-OTC', '');
-      text += `M1;${cleanPair};${sig.time};${sig.direction}\n`;
+      const raw = sig.quotexPair || sig.pair;
+      const isOtc = /_otc/i.test(raw) || /\(OTC\)/i.test(sig.pair);
+      const cleanPair = raw
+        .replace(/_otc$/i, '')
+        .replace(/\s*\(OTC\)/gi, '')
+        .replace(/\//g, '')
+        .replace(/-/g, '')
+        .toUpperCase();
+      text += `M1;${cleanPair}${isOtc ? ' (OTC)' : ''};${sig.time};${sig.direction}\n`;
     });
 
     text += `\n╚══☠️ ALDI FX OFFICIAL  ☠️ ══╝`;
@@ -327,28 +343,8 @@ export default function SignalsScreen() {
     <div className="flex flex-col h-full min-h-0">
       {/* Scrollable Container */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 lg:space-y-6 pb-4 overscroll-contain scrollbar-none w-full lg:max-w-5xl lg:mx-auto">
-        {/* Header Bar — mobile/tablet only */}
-        <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
-          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
-            <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-            </div>
-          </div>
-
-          <div className="flex-1 flex justify-center">
-            <span className="text-[14px] font-black tracking-[0.25em] text-white select-none drop-shadow-[0_0_10px_rgba(255,255,255,0.45)]">
-              NEXUS AI
-            </span>
-          </div>
-
-          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
-            <NexusLogoAvatar size="xs" />
-          </div>
-        </div>
-
+        {mode === 'generate' && (
+          <>
         {/* Floating Alarm Alert Banner */}
         <AnimatePresence>
           {activeAlarmMessage && (
@@ -506,8 +502,10 @@ export default function SignalsScreen() {
           </AnimatePresence>
         </div>
         </div>
+          </>
+        )}
 
-        {/* Future Signal Checker */}
+        {mode === 'check' && (
         <div className="p-4 lg:p-6 rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -581,6 +579,7 @@ export default function SignalsScreen() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

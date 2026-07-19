@@ -112,25 +112,6 @@ export default function ProfileScreen({ user, onUserUpdate }: ProfileScreenProps
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-6 pb-4 overscroll-contain scrollbar-none w-full lg:max-w-4xl lg:mx-auto">
-        <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
-          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center">
-            <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
-            </div>
-          </div>
-          <div className="flex-1 flex justify-center">
-            <span className="text-[14px] font-black tracking-[0.25em] text-white select-none">
-              NEXUS AI
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center p-1">
-            <NexusLogoAvatar size="xs" />
-          </div>
-        </div>
-
         <div className="relative p-5 rounded-xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.07] shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_15px_30px_-5px_rgba(0,0,0,0.5)] flex flex-col items-center text-center space-y-4">
           <div className="relative">
             <div className="absolute -inset-1.5 rounded-xl border border-amber-400/40 animate-pulse" />

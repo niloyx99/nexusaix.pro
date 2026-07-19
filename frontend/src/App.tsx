@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import GlowBackground from './components/GlowBackground';
+import HomeScreen from './components/HomeScreen';
 import DashboardScreenOne from './components/DashboardScreenOne';
 import DashboardScreenTwo from './components/DashboardScreenTwo';
 import SignalsScreen from './components/SignalsScreen';
-import NewsSignalsScreen from './components/NewsSignalsScreen';
 import ProfileScreen from './components/ProfileScreen';
-import BottomNavigation from './components/BottomNavigation';
 import SideNavigation from './components/SideNavigation';
+import MobileAppHeader from './components/MobileAppHeader';
+import MobileDrawer from './components/MobileDrawer';
 import LoginScreen from './components/LoginScreen';
 import InstallAppBanner from './components/InstallAppBanner';
 import { TabType, NexusUser } from './types';
@@ -27,14 +28,23 @@ import { getDeviceFingerprint } from './lib/deviceFingerprint';
 
 const DESKTOP_TITLES: Record<TabType, { title: string; subtitle: string }> = {
   home: { title: 'Hello Everyone', subtitle: 'Welcome Back!' },
-  signals: { title: 'Live Signals', subtitle: 'AI-powered market signals' },
-  news: { title: 'High Impact News', subtitle: 'ForexFactory high impact + Gemini AI' },
-  stats: { title: 'Performance', subtitle: 'Accuracy & trading stats' },
+  real: { title: 'Real Market Analyzer', subtitle: 'Live forex chart fusion signals' },
+  otc: { title: 'OTC Market Analyzer', subtitle: 'Quotex OTC chart fusion signals' },
+  signalGenerator: {
+    title: 'Signal Generator',
+    subtitle: 'OI · Liq · Funding · VP · VWAP + Gemini',
+  },
+  signalChecker: {
+    title: 'Signal Checker',
+    subtitle: 'Paste M1 signals · profit · MTG · pending',
+  },
+  stats: { title: 'Analytics', subtitle: 'Accuracy & trading performance' },
   profile: { title: 'My Profile', subtitle: 'Account & license details' },
 };
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activatedUser, setActivatedUser] = useState<NexusUser | null>(() => loadNexusUser());
   const [sessionChecking, setSessionChecking] = useState(() => !!loadNexusUser());
 
@@ -100,8 +110,10 @@ export default function App() {
       if (!imageFile) return;
 
       event.preventDefault();
-      if (activeTab !== 'home') {
-        setActiveTab('home');
+      const targetTab: TabType =
+        activeTab === 'real' || activeTab === 'otc' ? activeTab : 'otc';
+      if (activeTab !== targetTab) {
+        setActiveTab(targetTab);
         window.setTimeout(() => dispatchChartPaste(imageFile), 80);
       } else {
         dispatchChartPaste(imageFile);
@@ -136,6 +148,12 @@ export default function App() {
         )}
 
         <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
+          {activatedUser && (
+            <div className="lg:hidden px-4 pt-2 shrink-0">
+              <MobileAppHeader onOpenMenu={() => setMobileMenuOpen(true)} />
+            </div>
+          )}
+
           {desktopHeader && (
             <header className="hidden lg:flex items-center justify-center px-6 xl:px-10 py-5 shrink-0 border-b border-white/[0.06] relative">
               <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
@@ -149,7 +167,7 @@ export default function App() {
           )}
 
           <div
-            className="flex-1 min-h-0 px-4 sm:px-6 lg:px-8 xl:px-10 max-lg:pt-6 lg:pt-2 relative overflow-hidden flex flex-col"
+            className="flex-1 min-h-0 px-4 sm:px-6 lg:px-8 xl:px-10 max-lg:pt-3 lg:pt-2 relative overflow-hidden flex flex-col"
             style={{ paddingTop: !activatedUser ? 'var(--app-safe-top)' : undefined }}
           >
             <AnimatePresence mode="wait">
@@ -177,46 +195,72 @@ export default function App() {
                 <React.Fragment>
                   {activeTab === 'home' && (
                     <motion.div
-                      key="screen-1"
+                      key="screen-home"
                       initial={{ opacity: 0, x: -15 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 15 }}
                       transition={{ duration: 0.35, ease: 'easeInOut' }}
                       className="w-full h-full min-h-0 flex flex-col"
                     >
-                      <DashboardScreenOne />
+                      <HomeScreen user={activatedUser} />
                     </motion.div>
                   )}
 
-                  {activeTab === 'signals' && (
+                  {activeTab === 'real' && (
                     <motion.div
-                      key="screen-1.5"
+                      key="screen-real"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -12 }}
+                      transition={{ duration: 0.35, ease: 'easeInOut' }}
+                      className="w-full h-full min-h-0 flex flex-col"
+                    >
+                      <DashboardScreenOne marketMode="real" />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'otc' && (
+                    <motion.div
+                      key="screen-otc"
+                      initial={{ opacity: 0, x: -15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 15 }}
+                      transition={{ duration: 0.35, ease: 'easeInOut' }}
+                      className="w-full h-full min-h-0 flex flex-col"
+                    >
+                      <DashboardScreenOne marketMode="otc" />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'signalGenerator' && (
+                    <motion.div
+                      key="screen-signal-generator"
                       initial={{ opacity: 0, y: 15 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -15 }}
                       transition={{ duration: 0.35, ease: 'easeInOut' }}
                       className="w-full h-full min-h-0 flex flex-col"
                     >
-                      <SignalsScreen />
+                      <SignalsScreen mode="generate" />
                     </motion.div>
                   )}
 
-                  {activeTab === 'news' && (
+                  {activeTab === 'signalChecker' && (
                     <motion.div
-                      key="screen-news"
+                      key="screen-signal-checker"
                       initial={{ opacity: 0, y: 15 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -15 }}
                       transition={{ duration: 0.35, ease: 'easeInOut' }}
                       className="w-full h-full min-h-0 flex flex-col"
                     >
-                      <NewsSignalsScreen />
+                      <SignalsScreen mode="check" />
                     </motion.div>
                   )}
 
                   {activeTab === 'stats' && (
                     <motion.div
-                      key="screen-2"
+                      key="screen-stats"
                       initial={{ opacity: 0, x: 15 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -15 }}
@@ -229,7 +273,7 @@ export default function App() {
 
                   {activeTab === 'profile' && (
                     <motion.div
-                      key="screen-3"
+                      key="screen-profile"
                       initial={{ opacity: 0, scale: 0.98, y: 10 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.98, y: -10 }}
@@ -251,9 +295,12 @@ export default function App() {
           </div>
 
           {activatedUser && (
-            <div className="lg:hidden">
-              <BottomNavigation activeTab={activeTab} onChangeTab={setActiveTab} />
-            </div>
+            <MobileDrawer
+              open={mobileMenuOpen}
+              activeTab={activeTab}
+              onClose={() => setMobileMenuOpen(false)}
+              onChangeTab={setActiveTab}
+            />
           )}
 
           {activatedUser && <InstallAppBanner />}

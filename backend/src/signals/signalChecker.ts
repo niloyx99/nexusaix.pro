@@ -1,17 +1,20 @@
-import {
+﻿import {
   getPairInfo,
   getRecentCandles,
   refreshMarketSnapshots,
   quotexPairToDisplay,
-} from "./marketDataClient.js";
-import { getCachedCandles } from "./marketSnapshotCache.js";
+} from "../market/marketDataClient.js";
+import { getCachedCandles } from "../market/marketSnapshotCache.js";
 import { evaluateBinaryCandleOutcome } from "./binaryCandleOutcome.js";
-import { isAllowedMarketPair } from "../config/allowedMarkets.js";
+import { isAllowedMarketPair, isOtcPair } from "../config/allowedMarkets.js";
 import {
   fetchYahooM1Candles,
   mergeCandlesByTimestamp,
-} from "./yahooForexCandles.js";
-import type { MarketCandle } from "./marketDataClient.js";
+} from "../market/yahooForexCandles.js";
+import type { MarketCandle } from "../market/marketDataClient.js";
+
+/** Enough M1 bars for overnight / multi-hour signal lists. */
+const CHECKER_CANDLE_LIMIT = 180;
 
 export type SignalDirection = "CALL" | "PUT";
 export type CheckerOutcome =
@@ -55,8 +58,39 @@ function parseDateFromText(text: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  const ny = dt.getUTCFullYear();
+  const nm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const nd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${ny}-${nm}-${nd}`;
+}
+
+function hhmmToMinutes(hhmm: string): number {
+  const [hh, mm] = hhmm.split(":").map(Number);
+  return (hh || 0) * 60 + (mm || 0);
+}
+
+function normalizeHhmm(raw: string): string {
+  const [hPart, mPart] = raw.trim().split(":");
+  const hh = String(Number(hPart)).padStart(2, "0");
+  const mm = String(Number(mPart)).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function normalizePairToken(raw: string): string {
   return raw.trim().toUpperCase().replace(/\//g, "").replace(/\s+/g, "");
+}
+
+/** Canonical Quotex pair id — OTC suffix always `_otc` for VPS API. */
+function canonicalizeQuotexPair(pair: string): string {
+  const upper = pair.toUpperCase();
+  if (upper.endsWith("_OTC")) {
+    return `${upper.slice(0, -4)}_otc`;
+  }
+  return upper;
 }
 
 function resolveQuotexPair(token: string, preferOtc = false): string | null {
@@ -68,7 +102,7 @@ function resolveQuotexPair(token: string, preferOtc = false): string | null {
     : [upper.replace(/_OTC$/, ""), `${upper}_OTC`];
 
   for (const c of candidates) {
-    if (isAllowedMarketPair(c)) return c;
+    if (isAllowedMarketPair(c)) return canonicalizeQuotexPair(c);
   }
   return null;
 }
@@ -99,7 +133,7 @@ function parseSignalFromLine(line: string): Omit<ParsedFutureSignal, "dateKey"> 
   if (!match) return null;
 
   const pairToken = match[1].replace(/\s*\(OTC\)/gi, "").trim();
-  const time = match[2].padStart(5, "0");
+  const time = normalizeHhmm(match[2]);
   const direction = normalizeDirection(match[3]);
   if (!direction) return null;
 
@@ -117,20 +151,31 @@ function parseSignalFromLine(line: string): Omit<ParsedFutureSignal, "dateKey"> 
 }
 
 export function parseFutureSignalText(text: string): ParsedFutureSignal[] {
-  const dateKey = parseDateFromText(text);
+  const baseDateKey = parseDateFromText(text);
   const lines = text.split(/\r?\n/);
   const parsed: ParsedFutureSignal[] = [];
   const seen = new Set<string>();
+
+  // Midnight rollover: 23:59 → 00:03 means next calendar day (UTC+6)
+  let currentDateKey = baseDateKey;
+  let lastMinutes: number | null = null;
 
   for (const line of lines) {
     const row = parseSignalFromLine(line);
     if (!row) continue;
 
-    const dedupeKey = `${row.quotexPair}|${row.time}|${row.direction}`;
+    const minutes = hhmmToMinutes(row.time);
+    if (lastMinutes !== null && minutes + 90 < lastMinutes) {
+      // Time jumped backwards by >1.5h → crossed midnight
+      currentDateKey = addDaysToDateKey(currentDateKey, 1);
+    }
+    lastMinutes = minutes;
+
+    const dedupeKey = `${row.quotexPair}|${currentDateKey}|${row.time}|${row.direction}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
-    parsed.push({ ...row, dateKey });
+    parsed.push({ ...row, dateKey: currentDateKey });
   }
 
   return parsed;
@@ -155,15 +200,19 @@ function candleUtc6Key(candle: MarketCandle): string | null {
 
 function addMinutesToKey(key: string, minutes: number): string {
   const [datePart, timePart] = key.split("T");
+  const [y, mo, d] = datePart.split("-").map(Number);
   const [hh, mm] = timePart.split(":").map(Number);
-  const base = new Date(`${datePart}T00:00:00Z`);
-  base.setUTCHours(hh, mm + minutes, 0, 0);
+  const base = new Date(Date.UTC(y, mo - 1, d, hh, mm, 0));
+  base.setUTCMinutes(base.getUTCMinutes() + minutes);
+  const ny = base.getUTCFullYear();
+  const nm = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const nd = String(base.getUTCDate()).padStart(2, "0");
   const nh = String(base.getUTCHours()).padStart(2, "0");
-  const nm = String(base.getUTCMinutes()).padStart(2, "0");
-  return `${datePart}T${nh}:${nm}`;
+  const nmin = String(base.getUTCMinutes()).padStart(2, "0");
+  return `${ny}-${nm}-${nd}T${nh}:${nmin}`;
 }
 
-function findCandleForKey(
+function findCandleExact(
   candles: MarketCandle[],
   dateKey: string,
   hhmm: string
@@ -173,8 +222,16 @@ function findCandleForKey(
     if (candleUtc6Key(c) === key) return c;
   }
 
+  const want = normalizeHhmm(hhmm);
+  for (const c of candles) {
+    const k = candleUtc6Key(c);
+    if (k?.endsWith(`T${want}`) && k.startsWith(dateKey)) {
+      return c;
+    }
+  }
+
   const [y, m, d] = dateKey.split("-").map(Number);
-  const [hh, mm] = hhmm.split(":").map(Number);
+  const [hh, mm] = want.split(":").map(Number);
   const targetTs = Date.UTC(y, m - 1, d, hh - UTC_OFFSET_HOURS, mm, 0);
 
   let best: MarketCandle | null = null;
@@ -182,12 +239,30 @@ function findCandleForKey(
   for (const c of candles) {
     if (!c.timestamp) continue;
     const diff = Math.abs(c.timestamp * 1000 - targetTs);
-    if (diff < bestDiff && diff <= 90_000) {
+    // Wider window (3 min) — VPS candles can be slightly skewed
+    if (diff < bestDiff && diff <= 180_000) {
       bestDiff = diff;
       best = c;
     }
   }
   return best;
+}
+
+function findCandleForKey(
+  candles: MarketCandle[],
+  dateKey: string,
+  hhmm: string
+): MarketCandle | null {
+  const exact = findCandleExact(candles, dateKey, hhmm);
+  if (exact) return exact;
+
+  // Midnight / wrong-header fallback: try adjacent UTC+6 days
+  const nextDay = findCandleExact(candles, addDaysToDateKey(dateKey, 1), hhmm);
+  if (nextDay) return nextDay;
+  const prevDay = findCandleExact(candles, addDaysToDateKey(dateKey, -1), hhmm);
+  if (prevDay) return prevDay;
+
+  return null;
 }
 
 /** Quotex M1 rule: CALL wins on green (close > open), PUT on red (close < open). */
@@ -234,14 +309,21 @@ function formatSignalLine(signal: ParsedFutureSignal): string {
   return `M1;${signal.pair.replace(/_OTC$/i, "")};${signal.time};${signal.direction}`;
 }
 
+/**
+ * Fast candle load for checker:
+ * - Always refresh from VPS (local cache alone often misses overnight bars)
+ * - Yahoo only as REAL-market fallback when Quotex is empty
+ */
 async function loadCandlesForPair(pair: string): Promise<MarketCandle[]> {
-  await refreshMarketSnapshots();
-  const data = await getRecentCandles(pair, 120);
-  const cached = data?.candles ?? getCachedCandles(pair, 120);
+  const localCached = getCachedCandles(pair, CHECKER_CANDLE_LIMIT);
+  const data = await getRecentCandles(pair, CHECKER_CANDLE_LIMIT);
+  let candles = mergeCandlesByTimestamp(localCached, data?.candles ?? []);
 
-  const yahoo = await fetchYahooM1Candles(pair);
-  // Quotex cache wins over Yahoo when both have the same minute.
-  let candles = mergeCandlesByTimestamp(yahoo, cached);
+  // Yahoo only for REAL pairs when Quotex has almost nothing
+  if (!isOtcPair(pair) && candles.length < 5) {
+    const yahoo = await fetchYahooM1Candles(pair);
+    candles = mergeCandlesByTimestamp(yahoo, candles);
+  }
 
   if (!candles.length) {
     const info = await getPairInfo(pair);
@@ -267,18 +349,23 @@ async function preloadCandleCache(
 ): Promise<Map<string, MarketCandle[]>> {
   const pairs = [...new Set(signals.map((s) => s.quotexPair))];
   const cache = new Map<string, MarketCandle[]>();
-  await Promise.all(
-    pairs.map(async (pair) => {
-      cache.set(pair, await loadCandlesForPair(pair));
-    })
-  );
+  // Bound concurrency so VPS is not flooded (still much faster than sequential)
+  const CONCURRENCY = 4;
+  for (let i = 0; i < pairs.length; i += CONCURRENCY) {
+    const batch = pairs.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (pair) => {
+        cache.set(pair, await loadCandlesForPair(pair));
+      })
+    );
+  }
   return cache;
 }
 
-async function checkOneSignal(
+function evaluateSignalAgainstCandles(
   signal: ParsedFutureSignal,
-  candleCache: Map<string, MarketCandle[]>
-): Promise<Omit<CheckedSignal, "geminiConfirmed" | "geminiNote">> {
+  candles: MarketCandle[]
+): Omit<CheckedSignal, "geminiConfirmed" | "geminiNote"> {
   const line = formatSignalLine(signal);
 
   if (isSignalPending(signal)) {
@@ -292,12 +379,14 @@ async function checkOneSignal(
     };
   }
 
-  const candles = candleCache.get(signal.quotexPair) ?? [];
-
   const candle1 = findCandleForKey(candles, signal.dateKey, signal.time);
-  const key2 = addMinutesToKey(utc6KeyFromParts(signal.dateKey, signal.time), 1);
-  const [, time2] = key2.split("T");
-  const candle2 = findCandleForKey(candles, signal.dateKey, time2);
+  // MTG minute must follow the *actual* candle day (handles midnight header mismatch)
+  const candle1Key =
+    (candle1 && candleUtc6Key(candle1)) ||
+    utc6KeyFromParts(signal.dateKey, signal.time);
+  const key2 = addMinutesToKey(candle1Key, 1);
+  const [date2, time2] = key2.split("T");
+  const candle2 = findCandleForKey(candles, date2, time2);
 
   if (!candle1) {
     return {
@@ -323,6 +412,17 @@ async function checkOneSignal(
   }
 
   if (!candle2) {
+    const nowKey = nowUtc6Key();
+    if (nowKey < addMinutesToKey(key2, 1)) {
+      return {
+        ...signal,
+        outcome: "pending",
+        line,
+        marker: outcomeMarker("pending"),
+        candle1Found: true,
+        candle2Found: false,
+      };
+    }
     return {
       ...signal,
       outcome: "unknown",
@@ -333,8 +433,7 @@ async function checkOneSignal(
     };
   }
 
-  const mtgDir = signal.direction;
-  const mtg = evaluateCandle(mtgDir, candle2);
+  const mtg = evaluateCandle(signal.direction, candle2);
   if (mtg === "profit") {
     return {
       ...signal,
@@ -354,84 +453,6 @@ async function checkOneSignal(
     candle1Found: true,
     candle2Found: true,
   };
-}
-
-async function confirmWithGemini(
-  results: Omit<CheckedSignal, "geminiConfirmed" | "geminiNote">[]
-): Promise<Map<string, { outcome: CheckerOutcome; note: string }>> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const map = new Map<string, { outcome: CheckerOutcome; note: string }>();
-  if (!apiKey) return map;
-
-  const verifiable = results.filter(
-    (r) => r.outcome !== "unknown" && r.outcome !== "pending"
-  );
-  if (!verifiable.length) return map;
-
-  const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
-  const payload = verifiable.map((r) => ({
-    id: `${r.pair}-${r.time}`,
-    pair: r.quotexPair,
-    timeUtc6: r.time,
-    direction: r.direction,
-    engineOutcome: r.outcome,
-    candle1Found: r.candle1Found,
-    candle2Found: r.candle2Found,
-  }));
-
-  const prompt = `You validate 1-minute Quotex binary signal results (UTC+6).
-Rules:
-- profit = first candle wins: CALL if close > open, PUT if close < open
-- mtg_profit = first candle lost, same direction wins on next candle (1-step MTG)
-- mtg_loss = first and MTG candle both lost
-- Only exact flat candle (close equals open) counts as profit
-
-Return ONLY JSON:
-{"results":[{"id":"PAIR-12:10","outcome":"profit|mtg_profit|mtg_loss","note":"short"}]}
-
-Signals:
-${JSON.stringify(payload, null, 2)}`;
-
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:7777",
-        "X-Title": "Aldi Bot Signal Checker",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-        max_tokens: 1200,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!response.ok) return map;
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return map;
-
-    const parsed = JSON.parse(
-      content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
-    ) as {
-      results?: Array<{ id: string; outcome: CheckerOutcome; note?: string }>;
-    };
-
-    for (const row of parsed.results ?? []) {
-      if (!row.id || !row.outcome) continue;
-      map.set(row.id, { outcome: row.outcome, note: row.note ?? "Gemini confirmed" });
-    }
-  } catch {
-    return map;
-  }
-
-  return map;
 }
 
 export interface SignalCheckSummary {
@@ -464,29 +485,40 @@ export async function checkFutureSignalsText(text: string): Promise<SignalCheckS
     };
   }
 
+  // Always refresh snapshots so overnight candles are available
   await refreshMarketSnapshots();
   const candleCache = await preloadCandleCache(parsed);
-  const preliminary: Omit<CheckedSignal, "geminiConfirmed" | "geminiNote">[] = [];
-  for (const signal of parsed) {
-    preliminary.push(await checkOneSignal(signal, candleCache));
-  }
-  const geminiMap = await confirmWithGemini(preliminary);
 
-  const results: CheckedSignal[] = preliminary.map((row) => {
-    const id = `${row.pair}-${row.time}`;
-    const g = geminiMap.get(id);
-    const outcome =
-      row.outcome === "unknown" && g?.outcome ? g.outcome : row.outcome;
-    const geminiConfirmed =
-      !!g && (g.outcome === row.outcome || row.outcome === "unknown");
-    return {
-      ...row,
-      outcome,
-      geminiConfirmed,
-      geminiNote: g?.note ?? "",
-      marker: outcomeMarker(outcome),
-    };
-  });
+  // Pure candle math — no Gemini (was the main delay; outcomes are deterministic)
+  let preliminary = parsed.map((signal) =>
+    evaluateSignalAgainstCandles(signal, candleCache.get(signal.quotexPair) ?? [])
+  );
+
+  // One shared reload for pairs that still miss the primary candle
+  const missingPairs = [
+    ...new Set(
+      preliminary
+        .filter((r) => r.outcome === "unknown" && !r.candle1Found)
+        .map((r) => r.quotexPair)
+    ),
+  ];
+  if (missingPairs.length) {
+    await Promise.all(
+      missingPairs.map(async (pair) => {
+        candleCache.set(pair, await loadCandlesForPair(pair));
+      })
+    );
+    preliminary = parsed.map((signal) =>
+      evaluateSignalAgainstCandles(signal, candleCache.get(signal.quotexPair) ?? [])
+    );
+  }
+
+  const results: CheckedSignal[] = preliminary.map((row) => ({
+    ...row,
+    geminiConfirmed: false,
+    geminiNote: "",
+    marker: outcomeMarker(row.outcome),
+  }));
 
   const profit = results.filter((r) => r.outcome === "profit").length;
   const mtgProfit = results.filter((r) => r.outcome === "mtg_profit").length;

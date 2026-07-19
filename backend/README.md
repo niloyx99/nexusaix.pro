@@ -2,6 +2,9 @@
 
 API-only. No landing / frontend / admin static files.
 
+Folder map (serial): see [STRUCTURE.md](./STRUCTURE.md).  
+Edit `src/` (TypeScript). `dist/` is build output only — do not edit.
+
 ## Local
 
 ```bash

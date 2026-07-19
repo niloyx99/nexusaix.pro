@@ -21,7 +21,9 @@ services:
       - key: OPENROUTER_MODEL
         value: google/gemini-2.5-flash-lite
       - key: QUOTEX_MARKET_API_URL
-        value: https://quotex-data-1n2b.onrender.com
+        value: http://161.248.189.73:1339
+      - key: QUOTEX_MARKET_LEGACY
+        value: "true"
       - key: FRONTEND_URL
         sync: false
       - key: ADMIN_URL

@@ -1,6 +1,6 @@
-import { Router } from "express";
-import { generateFutureSignals } from "../services/futureSignals.js";
-import { checkFutureSignalsText } from "../services/signalChecker.js";
+﻿import { Router } from "express";
+import { generateFutureSignals } from "../signals/futureSignals.js";
+import { checkFutureSignalsText } from "../signals/signalChecker.js";
 import { requireActiveLicense } from "./licenses.js";
 
 const router = Router();

@@ -45,7 +45,25 @@ interface AnalysisResult {
 }
 
 
-export default function DashboardScreenOne() {
+export default function DashboardScreenOne({
+  marketMode,
+}: {
+  marketMode: 'real' | 'otc';
+}) {
+  const isOtc = marketMode === 'otc';
+  const analyzerTitle = isOtc ? 'OTC Market Analyzer' : 'Real Market Analyzer';
+  const analyzerSubtitle = isOtc
+    ? 'Quotex OTC chart fusion signals'
+    : 'Live forex chart fusion signals';
+  const analyzerHint = isOtc
+    ? 'Drop Quotex OTC candlestick charts, MT4/MT5 layouts, or indicator screens. AI extracts support zones, trend probability, and signal confidence in seconds.'
+    : 'Drop live forex / real-market charts. Engine uses MACD, moving averages, volume, liquidity, candlestick patterns, wick rejection, order flow & order blocks.';
+  const tipPlatform = isOtc
+    ? 'Supports MT4, MT5, Quotex OTC & indicator screenshots'
+    : 'Supports MT4, MT5, real forex & indicator screenshots';
+  const tipFusion = isOtc
+    ? 'AI fusion uses live OTC market data + Gemini analysis'
+    : 'MACD · MA · Volume · Liquidity · Wick · Order flow · Order block · FVG';
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -149,7 +167,7 @@ export default function DashboardScreenOne() {
           'Content-Type': 'application/json',
           ...getLicenseHeaders(),
         },
-        body: JSON.stringify({ image: imgData }),
+        body: JSON.stringify({ image: imgData, marketMode }),
       });
 
       const data = await response.json();
@@ -187,7 +205,7 @@ export default function DashboardScreenOne() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [checkMarketFeed, resetForNewAnalysis]);
+  }, [checkMarketFeed, resetForNewAnalysis, marketMode]);
 
   const processFile = useCallback((file: File | Blob) => {
     const normalized = file instanceof File ? file : new File([file], 'pasted-chart.png', { type: 'image/png' });
@@ -426,31 +444,6 @@ export default function DashboardScreenOne() {
               transition={{ duration: 0.3 }}
               className="space-y-6 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-10 xl:gap-12 lg:items-start lg:pt-6 xl:pt-8"
             >
-              {/* Header — mobile/tablet only */}
-              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none lg:col-span-2 max-lg:mt-1">
-                {/* Grid dots icon container matching bottom icon background style */}
-                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200">
-                  <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                  </div>
-                </div>
-
-                {/* Bot name in uppercase white letters */}
-                <div className="flex-1 flex justify-center">
-                  <span className="text-[14px] font-black tracking-[0.25em] text-white select-none drop-shadow-[0_0_10px_rgba(255,255,255,0.45)]">
-                    NEXUS AI
-                  </span>
-                </div>
-
-                {/* Profile Avatar with matching glass container style */}
-                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
-                  <NexusLogoAvatar size="xs" />
-                </div>
-              </div>
-
               <div className="space-y-6 lg:space-y-8">
               {/* Hello Welcoming — mobile only; desktop uses App header */}
               <div className="space-y-1 lg:hidden">
@@ -460,7 +453,7 @@ export default function DashboardScreenOne() {
                   transition={{ duration: 0.5, ease: 'easeOut' }}
                   className="text-[28px] font-extrabold tracking-tight text-white leading-tight"
                 >
-                  Hello Everyone
+                  {analyzerTitle}
                 </motion.h1>
                 <motion.p
                   initial={{ opacity: 0, y: 10 }}
@@ -468,7 +461,7 @@ export default function DashboardScreenOne() {
                   transition={{ delay: 0.1, duration: 0.5 }}
                   className="text-[13px] text-white/50 font-medium"
                 >
-                  Welcome Back!
+                  {analyzerSubtitle}
                 </motion.p>
               </div>
 
@@ -482,7 +475,7 @@ export default function DashboardScreenOne() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center space-x-2 min-w-0">
                     <Sparkles className="w-5 h-5 text-amber-400 animate-pulse shrink-0" />
-                    <span className="text-[14px] font-extrabold tracking-wide text-white truncate">AI Market Chart Analyzer</span>
+                    <span className="text-[14px] font-extrabold tracking-wide text-white truncate">{analyzerTitle}</span>
                   </div>
                   {marketFeedReady === false && (
                     <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/25">
@@ -551,7 +544,7 @@ export default function DashboardScreenOne() {
                 <div className="space-y-1">
                   <span className="text-[12px] font-bold text-white/90 block">Instant Automated Reports</span>
                   <p className="text-[11px] text-white/40 leading-relaxed">
-                    Drop any candlestick chart, MT4/MT5 layout, or indicator screen. AI extracts support zones, trend probability, and signal confidence in seconds.
+                    {analyzerHint}
                   </p>
                 </div>
               </motion.div>
@@ -565,8 +558,8 @@ export default function DashboardScreenOne() {
                 <span className="text-[13px] font-bold text-white/80 block">Quick Tips</span>
                 <ul className="space-y-3 text-[12px] text-white/45 leading-relaxed">
                   <li className="flex gap-2"><span className="text-amber-400">✦</span> Paste chart with Ctrl+V from anywhere in the app</li>
-                  <li className="flex gap-2"><span className="text-amber-400">✦</span> Supports MT4, MT5, Quotex & indicator screenshots</li>
-                  <li className="flex gap-2"><span className="text-amber-400">✦</span> AI fusion uses live market data + Gemini analysis</li>
+                  <li className="flex gap-2"><span className="text-amber-400">✦</span> {tipPlatform}</li>
+                  <li className="flex gap-2"><span className="text-amber-400">✦</span> {tipFusion}</li>
                 </ul>
               </motion.div>
               </div>
@@ -581,35 +574,6 @@ export default function DashboardScreenOne() {
               transition={{ duration: 0.35 }}
               className="space-y-6 lg:max-w-4xl lg:mx-auto lg:w-full"
             >
-              {/* Header — mobile/tablet only */}
-              <div className="lg:hidden flex items-center justify-between px-4 h-16 rounded-xl bg-black/10 backdrop-blur-2xl border border-white/[0.06] shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.02)] select-none max-lg:mt-1">
-                {/* Grid dots / Back icon container - acts as clear/back when clicked */}
-                <button
-                  onClick={handleClear}
-                  disabled={isAnalyzing}
-                  className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 disabled:opacity-50 disabled:scale-100 disabled:hover:bg-white/[0.04]"
-                >
-                  <div className="grid grid-cols-2 gap-1.5 w-4.5 h-4.5 group">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 group-hover:bg-white transition-all duration-200" />
-                  </div>
-                </button>
-
-                {/* Bot name in uppercase white letters */}
-                <div className="flex-1 flex justify-center">
-                  <span className="text-[14px] font-black tracking-[0.25em] text-white select-none drop-shadow-[0_0_10px_rgba(255,255,255,0.45)]">
-                    NEXUS AI
-                  </span>
-                </div>
-
-                {/* Profile Avatar with matching glass container style */}
-                <div className="w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.08] shadow-[0_0_12px_rgba(255,255,255,0.05)] flex items-center justify-center cursor-pointer hover:bg-white/[0.08] hover:scale-105 transition duration-200 p-1">
-                  <NexusLogoAvatar size="xs" />
-                </div>
-              </div>
-
               {isAnalyzing && <AnalysisLoader progress={analysisProgress} />}
 
               {/* Analysis Result display */}
@@ -640,33 +604,6 @@ export default function DashboardScreenOne() {
                         {analysisResult.recommendation}
                       </div>
                     </div>
-                    {(analysisResult.setupNote || analysisResult.setupFilters?.length) && (
-                      <div className="mt-3 relative z-10 flex flex-wrap items-center gap-2 lg:justify-center">
-                        {analysisResult.setupMode && (
-                          <span className="text-[9px] uppercase tracking-[0.18em] text-white/35 font-bold">
-                            {analysisResult.setupMode} setup
-                          </span>
-                        )}
-                        {analysisResult.setupNote && (
-                          <span className="text-[10px] text-white/45 font-medium">
-                            {analysisResult.setupNote}
-                          </span>
-                        )}
-                        {analysisResult.martingaleHint === '1-step' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber-500/25 text-amber-300/70 font-semibold">
-                            MTG×1
-                          </span>
-                        )}
-                        {analysisResult.setupFilters?.slice(0, 2).map((f) => (
-                          <span
-                            key={f}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-white/35"
-                          >
-                            {f}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
                   {/* ==================== SCREENSHOT HIGHLIGHTED CONVENTIONAL METRICS ==================== */}

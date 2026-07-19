@@ -1,4 +1,4 @@
-import {
+﻿import {
 
   analyzeChartImage,
 
@@ -12,7 +12,7 @@ import {
   getRecentCandles,
   isMarketDataReady,
   titleToQuotexPair,
-} from "./marketDataClient.js";
+} from "../market/marketDataClient.js";
 import { isAllowedMarketPair } from "../config/allowedMarkets.js";
 
 import {
@@ -34,7 +34,14 @@ import {
   applyTradeSetupRules,
   type SetupGateResult,
 } from "./tradeSetupRules.js";
-import type { MarketCandle } from "./marketDataClient.js";
+import type { MarketCandle } from "../market/marketDataClient.js";
+import {
+  analyzeRealMarket,
+  blendRealMarketSignal,
+  type RealMarketSignal,
+} from "./realMarketAnalysis.js";
+
+export type PreferredMarketMode = "REAL" | "OTC";
 
 
 
@@ -159,16 +166,16 @@ function fuseRecommendation(
 
   let direction: Direction = fusedDirection;
 
-  // Prefer live intel to invent fewer HOLDs when fusion was sideways.
+  // Prefer live intel when fusion was sideways.
   if (direction === "SIDEWAYS" && intel?.nextCandleDirection && intel.nextCandleDirection !== "SIDEWAYS") {
-    if (intel.confidencePct >= (isOtc ? 55 : 52)) {
+    if (intel.confidencePct >= (isOtc ? 56 : 52)) {
       direction = intel.nextCandleDirection;
     }
   }
 
   if (direction === "SIDEWAYS") {
     const fromGemini = geminiTradeDirection(gemini);
-    if (fromGemini !== "SIDEWAYS" && fusionConfidence >= 54) {
+    if (fromGemini !== "SIDEWAYS" && fusionConfidence >= (isOtc ? 60 : 54)) {
       direction = fromGemini;
     }
   }
@@ -179,12 +186,14 @@ function fuseRecommendation(
   const bearish = direction === "DOWN";
 
   const strong =
-    fusionConfidence >= 78 &&
+    fusionConfidence >= (isOtc ? 76 : 78) &&
     direction !== "SIDEWAYS" &&
     Boolean(
-      intel?.liquiditySweep.detected ||
-        intel?.oppositeCandleSignal.detected ||
-        intel?.priceAction.rejection
+      isOtc
+        ? intel?.lmp?.aligned || intel?.priceAction.rejection
+        : intel?.liquiditySweep.detected ||
+            intel?.oppositeCandleSignal.detected ||
+            intel?.priceAction.rejection
     );
 
   if (direction === "SIDEWAYS" || fusionConfidence < minConfidence) {
@@ -200,125 +209,6 @@ function fuseRecommendation(
   }
 
   return "HOLD";
-}
-
-
-
-function applyOtcSafetyGate(
-
-  isOtc: boolean,
-
-  intel: MarketIntelligence | null,
-
-  direction: Direction,
-
-  confidence: number
-
-): { direction: Direction; confidence: number } {
-
-  if (!isOtc || !intel || direction === "SIDEWAYS") {
-
-    return { direction, confidence };
-
-  }
-
-
-
-  let nextDirection = direction;
-
-  let nextConfidence = confidence;
-
-  const live = intel.nextCandleDirection;
-
-  const insight = intel.otcInsight.toLowerCase();
-
-
-
-  // OTC: follow live expansion / last-candle push — do not fight V-recoveries.
-  if (insight.includes("bullish expansion")) {
-
-    if (nextDirection === "DOWN") {
-
-      return { direction: live === "UP" ? "UP" : "SIDEWAYS", confidence: Math.min(nextConfidence, live === "UP" ? 72 : 45) };
-
-    }
-
-    if (live === "UP") {
-
-      nextDirection = "UP";
-
-      nextConfidence = Math.max(nextConfidence, 70);
-
-    }
-
-  }
-
-  if (insight.includes("bearish expansion")) {
-
-    if (nextDirection === "UP") {
-
-      return { direction: live === "DOWN" ? "DOWN" : "SIDEWAYS", confidence: Math.min(nextConfidence, live === "DOWN" ? 72 : 45) };
-
-    }
-
-    if (live === "DOWN") {
-
-      nextDirection = "DOWN";
-
-      nextConfidence = Math.max(nextConfidence, 70);
-
-    }
-
-  }
-
-
-
-  // Live feed wins over chart-only SELL when momentum is already UP (common MTG loss case).
-  if (nextDirection === "DOWN" && (intel.momentum === "BULLISH" || live === "UP")) {
-
-    if (live === "UP" && intel.confidencePct >= 52) {
-
-      return { direction: "UP", confidence: Math.max(60, Math.min(88, intel.confidencePct)) };
-
-    }
-
-    // Prefer follow live over HOLD
-    if (live === "UP") return { direction: "UP", confidence: Math.max(58, Math.min(nextConfidence, 70)) };
-
-  }
-
-  if (nextDirection === "UP" && (intel.momentum === "BEARISH" || live === "DOWN")) {
-
-    if (live === "DOWN" && intel.confidencePct >= 52) {
-
-      return { direction: "DOWN", confidence: Math.max(60, Math.min(88, intel.confidencePct)) };
-
-    }
-
-    if (live === "DOWN") return { direction: "DOWN", confidence: Math.max(58, Math.min(nextConfidence, 70)) };
-
-  }
-
-
-
-  if (
-
-    live !== "SIDEWAYS" &&
-
-    live !== nextDirection &&
-
-    intel.confidencePct >= 58
-
-  ) {
-
-    return { direction: live, confidence: Math.max(60, Math.min(90, intel.confidencePct)) };
-
-  }
-
-
-
-  return { direction: nextDirection, confidence: nextConfidence };
-
 }
 
 
@@ -367,6 +257,7 @@ function buildFusionConfidence(
     if (intel.liquiditySweep.detected && intel.oppositeCandleSignal.detected) bonus += 4;
     else if (intel.liquiditySweep.detected || intel.oppositeCandleSignal.detected) bonus += 2;
     if (intel.priceAction.rejection) bonus += 2;
+    if (intel.lmp?.aligned && directionsAlign(intel.lmp.direction, fusedDirection)) bonus += 1;
   } else if (!thinData) {
     bonus -= 6;
   }
@@ -399,27 +290,24 @@ function resolveFusedDirection(
 
   snapshot?: { open: number; high: number; low: number; close: number } | null,
 
-  isOtc = false
+  _isOtc = false
 
 ): { direction: Direction; conflict: boolean } {
 
   const geminiDir = geminiTradeDirection(gemini);
   const thinData = candlesUsed < 8;
 
-  // OTC: live market momentum first — chart trend alone caused many wrong SELL/MTG losses.
-  if (isOtc && intel && intel.nextCandleDirection !== "SIDEWAYS" && intel.confidencePct >= 58) {
+  // OTC simple engine: wick/volume/LMP intel leads; Gemini only confirms.
+  if (_isOtc && intel && intel.nextCandleDirection !== "SIDEWAYS" && intel.confidencePct >= 56) {
     if (geminiDir === "SIDEWAYS" || geminiDir === intel.nextCandleDirection) {
       return { direction: intel.nextCandleDirection, conflict: false };
     }
-    if (intel.otcInsight.toLowerCase().includes("expansion")) {
-      return { direction: intel.nextCandleDirection, conflict: true };
-    }
-    // Prefer live when confidence is clearly higher than chart win-rate guess.
-    if (intel.confidencePct >= gemini.winRatePct + 4) {
+    if (intel.confidencePct >= gemini.winRatePct) {
       return { direction: intel.nextCandleDirection, conflict: true };
     }
   }
 
+  // Classic fusion for REAL (and OTC fallback)
   if (geminiDir === "SIDEWAYS") {
 
     if (intel?.nextCandleDirection && intel.nextCandleDirection !== "SIDEWAYS") {
@@ -636,106 +524,82 @@ function alignKpiWithFusion(
 
 
 
+/**
+ * Chart fusion — marketMode is REQUIRED and locks the engine:
+ * REAL → realMarketAnalysis + applyRealMarketSetup
+ * OTC  → wick + volume + LMP only (simple engine)
+ */
 export async function analyzeWithFusion(
-
-  image: string
-
+  image: string,
+  options: { preferredMarket: PreferredMarketMode }
 ): Promise<FusedAnalysisResult> {
+  const preferred = options.preferredMarket;
+  if (preferred !== "REAL" && preferred !== "OTC") {
+    throw Object.assign(new Error("preferredMarket must be REAL or OTC"), {
+      code: "INVALID_MARKET_MODE",
+    });
+  }
 
+  const isOtcMarket = preferred === "OTC";
   const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
 
   const health = await checkMarketDataHealth({ force: !isMarketDataReady() });
 
   const marketApiUrl =
-
-    health.url || process.env.QUOTEX_MARKET_API_URL || "https://quotex-data-1n2b.onrender.com";
+    health.url || process.env.QUOTEX_MARKET_API_URL || "http://161.248.189.73:1339";
 
   if (health.status !== "ok") {
-
     throw Object.assign(new Error("Market data feed offline"), {
-
       code: "MARKET_DATA_OFFLINE",
-
     });
-
   }
 
-  // Vision call only after market feed is confirmed (saves Gemini tokens on offline).
-  const gemini = await analyzeChartImage(image);
-
+  // Vision locked to the selected analyzer tab — never infer the other market
+  const gemini = await analyzeChartImage(image, { marketType: preferred });
   const geminiIsFallback = gemini.analysisText.includes("Simulation mode");
+  gemini.marketType = preferred;
 
-
-
-  const quotexPair = titleToQuotexPair(
-
-    gemini.analysisTitle,
-
-    gemini.marketType
-
-  );
-
-
+  const quotexPair = titleToQuotexPair(gemini.analysisTitle, preferred);
 
   let marketStatus: AnalysisSources["marketData"]["status"] = "offline";
-
   let candlesUsed = 0;
-
   let payoutPercent: number | null = null;
-
   let momentum: Bias = "NEUTRAL";
-
   let nextDirection: Direction = "SIDEWAYS";
-
   let marketDataSummary = "Quotex market data API is offline.";
-
   let intel: MarketIntelligence | null = null;
-
   let pairInfo: Awaited<ReturnType<typeof getPairInfo>> = null;
-
   let liveCandles: MarketCandle[] = [];
-
-
+  let realSignal: RealMarketSignal | null = null;
 
   if (health.status === "ok" && quotexPair && !isAllowedMarketPair(quotexPair)) {
     marketStatus = "pair_not_found";
     marketDataSummary = `Pair **${quotexPair}** is not in the allowed market list.`;
   } else if (health.status === "ok" && quotexPair && isAllowedMarketPair(quotexPair)) {
-
+    // Reject cross-market pair bleed (e.g. OTC symbol on Real tab)
+    const pairIsOtc = quotexPair.toLowerCase().endsWith("_otc");
+    if (isOtcMarket !== pairIsOtc) {
+      marketStatus = "pair_not_found";
+      marketDataSummary = isOtcMarket
+        ? `Pair **${quotexPair}** is a REAL symbol — open Real Market Analyzer.`
+        : `Pair **${quotexPair}** is an OTC symbol — open OTC Market Analyzer.`;
+    } else {
     pairInfo = await getPairInfo(quotexPair);
-
-    const isOtcPreview =
-      gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
-    // Faster window: EMA50 works with ~60–80; skip waiting on 220 remote candles.
-    const candleData = await getRecentCandles(quotexPair, isOtcPreview ? 50 : 80);
-
-
+    // Real needs ~50–90 bars for MACD/EMA50; OTC stays lean for speed.
+    const candleData = await getRecentCandles(quotexPair, isOtcMarket ? 50 : 90);
 
     if (!pairInfo && !candleData) {
-
       marketStatus = "pair_not_found";
-
       marketDataSummary = `Pair **${quotexPair}** not found in live market database.`;
-
     } else if (!candleData?.candles?.length) {
-
       marketStatus = "no_candles";
-
       payoutPercent = pairInfo?.payout ?? candleData?.payout ?? null;
-
       marketDataSummary = `Pair **${quotexPair}** found but no candle history yet.`;
-
     } else {
-
       marketStatus = "ok";
-
       candlesUsed = candleData.candles.length;
       liveCandles = candleData.candles;
-
       payoutPercent = pairInfo?.payout ?? candleData.payout ?? null;
-
-      const isOtcMarket =
-        gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
 
       if (
         candlesUsed < 8 &&
@@ -760,27 +624,24 @@ export async function analyzeWithFusion(
         });
       }
 
-
+      // REAL ONLY — never run on OTC analyzer
+      if (!isOtcMarket) {
+        realSignal = analyzeRealMarket(candleData.candles);
+      }
 
       momentum = intel.momentum;
-
       nextDirection = intel.nextCandleDirection;
-
       marketDataSummary = [
-
-        `### Live Quotex Fusion Feed`,
-
+        `### Live Quotex Fusion Feed (${preferred})`,
         `Pair: **${quotexPair}** | Payout: **${payoutPercent ? `${payoutPercent}%` : "N/A"}** | Candles: **${candlesUsed}**`,
-
         intel.summaryMarkdown,
-
-      ].join("\n\n");
-
+        realSignal ? realSignal.summaryMarkdown : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     }
-
+    }
   }
-
-
 
   const snapshot =
     pairInfo?.open !== undefined &&
@@ -795,33 +656,35 @@ export async function analyzeWithFusion(
         }
       : null;
 
-  const isOtcMarket =
-    gemini.marketType === "OTC" || quotexPair.endsWith("_otc");
-
   const { direction: fusedDirection, conflict: directionsConflict } =
     resolveFusedDirection(gemini, intel, candlesUsed, snapshot, isOtcMarket);
 
   let fusionConfidencePct = buildFusionConfidence(
-
     gemini,
-
     intel,
-
     marketStatus === "ok",
-
     payoutPercent,
-
     fusedDirection,
-
     candlesUsed,
-
     directionsConflict
-
   );
 
-  const otcGate = applyOtcSafetyGate(isOtcMarket, intel, fusedDirection, fusionConfidencePct);
-  let safeDirection = otcGate.direction;
-  fusionConfidencePct = clampWinRate(otcGate.confidence);
+  let safeDirection = fusedDirection;
+
+  if (isOtcMarket) {
+    // OTC simple — wick/volume/LMP already in intel + setup
+    safeDirection = fusedDirection;
+    fusionConfidencePct = clampWinRate(fusionConfidencePct);
+  } else if (realSignal) {
+    // REAL ONLY — MACD/MA/Volume/Liquidity/Pattern/Wick/OrderFlow/OB
+    const blended = blendRealMarketSignal(
+      fusedDirection,
+      fusionConfidencePct,
+      realSignal
+    );
+    safeDirection = blended.direction;
+    fusionConfidencePct = clampWinRate(blended.confidence);
+  }
 
   const setup = await applyTradeSetupRules({
     isOtc: isOtcMarket,
@@ -831,122 +694,92 @@ export async function analyzeWithFusion(
     pair: quotexPair,
     intel,
   });
+  // OTC setup is passthrough (classic labels only); Real may gate
   safeDirection = setup.direction;
   fusionConfidencePct = clampWinRate(setup.confidence);
 
+  // Final Real refine after setup gates — REAL ONLY
+  if (!isOtcMarket && realSignal && liveCandles.length >= 8) {
+    const refined = blendRealMarketSignal(safeDirection, fusionConfidencePct, realSignal);
+    if (realSignal.alignedCount >= 4) {
+      safeDirection = refined.direction;
+      fusionConfidencePct = clampWinRate(refined.confidence);
+      if (refined.labels[0] && !setup.filters.includes(refined.labels[0])) {
+        setup.filters = [refined.labels[0], ...setup.filters].slice(0, 5);
+      }
+      setup.note = "REAL · MACD+MA+Vol+Liq+Wick+OB+FVG";
+    }
+  }
+
   const recommendation = fuseRecommendation(
-
     gemini,
-
     intel,
-
     safeDirection,
-
     fusionConfidencePct,
-
     isOtcMarket
-
   );
-
-
 
   const kpiAlignment = alignKpiWithFusion(
-
     gemini,
-
     intel,
-
     safeDirection,
-
     fusionConfidencePct
-
   );
-
-
 
   const mergedText = mergeAnalysisText(
-
     gemini.analysisText,
-
     intel,
-
     safeDirection,
-
     fusionConfidencePct,
-
     quotexPair,
-
     payoutPercent,
-
     directionsConflict,
-
     setup
-
   );
 
-
-
   return {
-
     ...gemini,
-
     ...kpiAlignment,
-
+    marketType: preferred,
     recommendation,
-
     winRatePct: fusionConfidencePct,
-
     winRateVal: `${fusionConfidencePct}% WIN RATE`,
-
     nextCandleDirection: safeDirection,
-
     fusionConfidencePct,
-
     fusionConfidenceVal: `${fusionConfidencePct}% WIN RATE`,
-
     quotexPair,
-
     payoutPercent,
-
     marketMomentum: momentum,
-
     marketDataSummary,
-
-    setupMode: isOtcMarket ? "OTC" : "REAL",
+    setupMode: preferred,
     setupNote: setup.note,
     setupFilters: setup.filters,
-    martingaleHint: setup.martingaleHint,
-
+    martingaleHint: isOtcMarket ? setup.martingaleHint : "none",
     analysisSources: {
-
       gemini: {
-
         model,
-
         status: geminiIsFallback ? "fallback" : "ok",
-
       },
-
       marketData: {
-
         status: marketStatus,
-
         apiUrl: marketApiUrl,
-
         pair: quotexPair,
-
         candlesUsed,
-
         payoutPercent,
-
       },
-
     },
-
     analysisText: mergedText,
-
   };
+}
 
+/** Real Market Analyzer entry — Real engine only. */
+export function analyzeRealMarketChart(image: string): Promise<FusedAnalysisResult> {
+  return analyzeWithFusion(image, { preferredMarket: "REAL" });
+}
+
+/** OTC Market Analyzer entry — OTC engine only. */
+export function analyzeOtcMarketChart(image: string): Promise<FusedAnalysisResult> {
+  return analyzeWithFusion(image, { preferredMarket: "OTC" });
 }
 
 

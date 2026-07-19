@@ -19,11 +19,14 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemini-2.5-flash-lite";
 
 /** Tiny prompt = fewer input tokens. Output capped hard below. */
-const ANALYSIS_PROMPT = `Quotex 1-min chart. Reply JSON only.
-Read pair from title. OTC if "(OTC)" else REAL.
+function buildAnalysisPrompt(marketType: "REAL" | "OTC"): string {
+  return `Quotex 1-min ${marketType} market chart. Reply JSON only.
+User selected ${marketType} analyzer — set marketType to "${marketType}" only. Do not switch to the other market.
+Read pair name from chart title (ignore opposite market labels).
 Next candle only: last 1-2 candle momentum. Green push=BUY, red dump=SELL, unclear=HOLD.
 Never SELL into strong green. Never BUY into strong red.
-{"trend":"BULLISH|BEARISH|NEUTRAL","winRatePct":58-82,"winRateVal":"72% WIN RATE","supportVal":"—","supportPct":50,"resistanceVal":"—","resistancePct":50,"signalQualityVal":"MEDIUM","signalQualityPct":60,"analysisTitle":"EUR/USD","marketType":"OTC","analysisText":"Next: UP/DOWN. 1 short reason.","recommendation":"BUY|SELL|HOLD"}`;
+{"trend":"BULLISH|BEARISH|NEUTRAL","winRatePct":58-82,"winRateVal":"72% WIN RATE","supportVal":"—","supportPct":50,"resistanceVal":"—","resistancePct":50,"signalQualityVal":"MEDIUM","signalQualityPct":60,"analysisTitle":"EUR/USD","marketType":"${marketType}","analysisText":"Next: UP/DOWN. 1 short reason.","recommendation":"BUY|SELL|HOLD"}`;
+}
 
 function getApiKey(): string | null {
   const key = process.env.OPENROUTER_API_KEY;
@@ -34,7 +37,10 @@ function getApiKey(): string | null {
   return key;
 }
 
-export function getFallbackAnalysis(errorReason?: string): AnalysisResult {
+export function getFallbackAnalysis(
+  errorReason?: string,
+  marketType: "REAL" | "OTC" = "REAL"
+): AnalysisResult {
   const errorNote = errorReason
     ? `\n\n*(Simulation mode: ${errorReason})*`
     : `\n\n*Set OPENROUTER_API_KEY in backend/.env for live analysis.*`;
@@ -50,13 +56,18 @@ export function getFallbackAnalysis(errorReason?: string): AnalysisResult {
     signalQualityVal: "LOW",
     signalQualityPct: 45,
     analysisTitle: "Unknown Pair",
-    marketType: "OTC",
+    marketType,
     analysisText: `### Analysis Unavailable\n\n* Live AI analysis could not run. **Do not trade** on this result.${errorNote}`,
     recommendation: "HOLD",
   };
 }
 
-function normalizeMarketType(value: unknown, title?: string): "REAL" | "OTC" {
+function normalizeMarketType(
+  value: unknown,
+  forced?: "REAL" | "OTC",
+  title?: string
+): "REAL" | "OTC" {
+  if (forced === "REAL" || forced === "OTC") return forced;
   const raw = String(value || "").toUpperCase();
   if (raw === "OTC") return "OTC";
   if (raw === "REAL") return "REAL";
@@ -76,7 +87,10 @@ function normalizeRecommendation(
   return "HOLD";
 }
 
-function normalizeAnalysisResult(data: Partial<AnalysisResult>): AnalysisResult {
+function normalizeAnalysisResult(
+  data: Partial<AnalysisResult>,
+  forcedMarket?: "REAL" | "OTC"
+): AnalysisResult {
   const cleanTitle = String(data.analysisTitle || "Unknown Pair")
     .replace(/\s*\(OTC\)/gi, "")
     .replace(/\s*\(REAL\)/gi, "")
@@ -100,15 +114,21 @@ function normalizeAnalysisResult(data: Partial<AnalysisResult>): AnalysisResult 
     signalQualityVal: String(data.signalQualityVal || "MEDIUM").slice(0, 16),
     signalQualityPct: Math.max(1, Math.min(100, Number(data.signalQualityPct) || 60)),
     analysisTitle: cleanTitle,
-    marketType: normalizeMarketType(data.marketType, data.analysisTitle),
+    marketType: normalizeMarketType(data.marketType, forcedMarket, data.analysisTitle),
     analysisText,
     recommendation: normalizeRecommendation(data.recommendation),
   };
 }
 
-function parseJsonResponse(text: string): AnalysisResult {
+function parseJsonResponse(
+  text: string,
+  forcedMarket?: "REAL" | "OTC"
+): AnalysisResult {
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  return normalizeAnalysisResult(JSON.parse(cleaned) as Partial<AnalysisResult>);
+  return normalizeAnalysisResult(
+    JSON.parse(cleaned) as Partial<AnalysisResult>,
+    forcedMarket
+  );
 }
 
 /**
@@ -130,14 +150,19 @@ function shrinkImageDataUrl(image: string): string {
   return raw;
 }
 
-export async function analyzeChartImage(image: string): Promise<AnalysisResult> {
+export async function analyzeChartImage(
+  image: string,
+  options: { marketType: "REAL" | "OTC" }
+): Promise<AnalysisResult> {
+  const marketType = options.marketType;
   const apiKey = getApiKey();
   if (!apiKey) {
-    return getFallbackAnalysis();
+    return getFallbackAnalysis(undefined, marketType);
   }
 
   const imageUrl = shrinkImageDataUrl(image);
   const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+  const prompt = buildAnalysisPrompt(marketType);
 
   try {
     const response = await fetch(OPENROUTER_API_URL, {
@@ -156,7 +181,7 @@ export async function analyzeChartImage(image: string): Promise<AnalysisResult> 
             role: "user",
             content: [
               { type: "image_url", image_url: { url: imageUrl } },
-              { type: "text", text: ANALYSIS_PROMPT },
+              { type: "text", text: prompt },
             ],
           },
         ],
@@ -188,11 +213,11 @@ export async function analyzeChartImage(image: string): Promise<AnalysisResult> 
       throw new Error("No content returned from model");
     }
 
-    return parseJsonResponse(content);
+    return parseJsonResponse(content, marketType);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "API connection issue";
     const shortError = message.length > 80 ? message.slice(0, 80) + "..." : message;
     console.log(`OpenRouter (${model}) unavailable, using fallback.`);
-    return getFallbackAnalysis(shortError);
+    return getFallbackAnalysis(shortError, marketType);
   }
 }

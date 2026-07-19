@@ -1,8 +1,8 @@
-import fs from "fs/promises";
+﻿import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { License, LicenseUsageRecord } from "../types/license.js";
-import type { ChartSignalRecord } from "../services/chartAnalytics.js";
+import type { License, LicenseUsageRecord } from "../license/license.js";
+import type { ChartSignalRecord } from "../market/chartAnalytics.js";
 import { COLLECTIONS, getCollection } from "./mongo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -1,16 +1,16 @@
-import type { License, LicenseUsageRecord } from "../types/license.js";
+﻿import type { License, LicenseUsageRecord } from "./license.js";
 import { COLLECTIONS, getCollection } from "../db/mongo.js";
 import {
   TIER_DAILY_LIMITS,
   UNLIMITED_DAILY_LIMIT,
   UNLIMITED_DEVICE_LIMIT,
-} from "../types/license.js";
+} from "./license.js";
 import type {
   LicenseTier,
   ValidateLicenseBody,
   ValidateLicenseResponse,
   DeviceBinding,
-} from "../types/license.js";
+} from "./license.js";
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
